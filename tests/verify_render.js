@@ -686,6 +686,14 @@ async function main() {
      * verify_meta.js already covers. */
     const META_KEY = 'cinderloop.meta.v1';
     const CFG = H.loadSim().CFG;
+    // Earlier sections of this same suite run real gameplay (combat/movement/
+    // hazards) where the test player can legitimately die, firing the real
+    // 'runEnd' bus event — which 95-app.js already wires to auto-save
+    // sim.meta. That can leave an all-default Meta object sitting in
+    // localStorage before this "first boot" check ever runs, exactly the
+    // same class of leak the settings-key precedent above this block
+    // exists to prevent. Cleared here for the identical reason.
+    await read(client, sid, "localStorage.removeItem('cinderloop.meta.v1')");
     const freshMeta = await read(client, sid, `(function () {
       return { stored: localStorage.getItem(${JSON.stringify(META_KEY)}),
                currency: window.CINDER_APP.sim.meta.currency };
