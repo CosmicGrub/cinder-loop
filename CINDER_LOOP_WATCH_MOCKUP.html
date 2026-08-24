@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CINDER LOOP — Watch Companion (Static Mockup)</title>
+<style>
+  /* ==========================================================================
+   * A STATIC DESIGN MOCKUP, not a companion. There is no live data channel
+   * between this page and the game — the game (L2) is single-file, zero
+   * network, no server; nothing it does can currently tell a separate piece
+   * of hardware anything in real time. Every number the circular face below
+   * shows is a fixed sample. This exists to answer "what would a watch
+   * status view look like," not "here is one working."
+   *
+   * Sized to the Galaxy Watch6 Classic's actual native resolution — 480x480,
+   * round 1.5" AMOLED — not a guess. Composed to look correct if actually
+   * opened at that exact size on a round display (content clipped to a true
+   * circle, nothing meaningful placed in the corners a round screen would
+   * cut), and also legible as a preview centered on an ordinary desktop or
+   * phone browser, which is realistically how anyone actually views this
+   * file: Wear OS has no standard way to sideload and pin an arbitrary HTML
+   * page the way a phone browser has "Add to Home Screen," so nothing here
+   * claims this was opened on real watch hardware. It was verified rendering
+   * cleanly, at the correct pixel dimensions, in real Chromium — see the
+   * caption below the face for exactly what that does and does not mean.
+   * ========================================================================== */
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: #0d0b10; color: #e8d8b0;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 22px; padding: 32px 20px 48px;
+  }
+
+  /* ---------------------------------------------------------- the face
+   * 480x480 exactly. A bezel ring outside the clipped circle evokes the
+   * Watch6 Classic's signature physical rotating bezel — drawn purely as
+   * decoration, matching what the hardware looks like. It is not
+   * interactive: real bezel INPUT is a native Wear OS rotary-input API with
+   * no equivalent in a plain web page, which is exactly the kind of gap the
+   * "real native Wear OS app" option (not the one chosen) would need to
+   * close, and is out of scope here. */
+  .watch {
+    position: relative;
+    width: 480px; height: 480px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .bezel {
+    position: absolute; inset: 0; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, transparent 0, transparent 218px, #2a2430 218px, #352d3b 226px, #211c26 236px, #17131b 240px);
+    box-shadow: 0 0 0 1px #0a080c, inset 0 0 24px rgba(0,0,0,0.5);
+  }
+  .bezel::before {
+    /* Faint tick marks around the bezel ring, every 6 degrees — decorative
+       only, static. */
+    content: '';
+    position: absolute; inset: 0; border-radius: 50%;
+    background-image: repeating-conic-gradient(
+      rgba(232,216,176,0.10) 0deg 0.6deg,
+      transparent 0.6deg 6deg
+    );
+    -webkit-mask: radial-gradient(circle, transparent 224px, #000 226px, #000 238px, transparent 240px);
+            mask: radial-gradient(circle, transparent 224px, #000 226px, #000 238px, transparent 240px);
+  }
+  .face {
+    position: absolute;
+    width: 436px; height: 436px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 38%, #17131c 0%, #0d0b10 68%, #09070b 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.55), inset 0 0 2px rgba(232,216,176,0.15);
+  }
+
+  /* ---------------------------------------------------------- face content */
+  .hearts { display: flex; gap: 8px; margin-bottom: 6px; }
+  .heart { width: 16px; height: 16px; border-radius: 3px; }
+  .heart.full { background: #d1495b; box-shadow: 0 0 8px rgba(209,73,91,0.55); }
+  .heart.empty { background: #3a2f36; }
+
+  .timer {
+    font-size: 56px; font-weight: 600; letter-spacing: 0.02em;
+    color: #e8d8b0; line-height: 1; margin: 10px 0 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .timer-label {
+    font-size: 11px; letter-spacing: 0.18em; color: #6b6274;
+    text-transform: uppercase; margin-bottom: 18px;
+  }
+
+  .ember-mark {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #221c29; border: 2px solid #7d6d52;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+  }
+  .ember-mark::after {
+    content: ''; width: 8px; height: 8px; border-radius: 2px;
+    background: #ff9a5c; box-shadow: 0 0 6px rgba(255,154,92,0.7);
+  }
+
+  .biome { font-size: 13px; letter-spacing: 0.14em; color: #9fd0e0; text-transform: uppercase; }
+  .depth { font-size: 11px; color: #6b6274; margin-top: 2px; }
+
+  .sample-pip {
+    position: absolute; bottom: 46px; left: 50%; transform: translateX(-50%);
+    font-size: 8px; letter-spacing: 0.14em; color: #4a4350;
+    text-transform: uppercase;
+  }
+
+  /* --------------------------------------------------------- page chrome
+   * Everything below is deliberately OUTSIDE the circular face — a real
+   * watch-face composition stays clean; the disclosure belongs to the
+   * surrounding preview page, the same way a watch-face-picker's own UI
+   * carries labels the face itself never would. */
+  .badge {
+    font-size: 11px; letter-spacing: 0.12em; color: #ffd166;
+    border: 1px solid #6a5a2c; border-radius: 3px;
+    padding: 5px 12px; text-transform: uppercase;
+  }
+  .caption {
+    max-width: 480px; text-align: center;
+    font-size: 12.5px; line-height: 1.6; color: #8b8194;
+  }
+  .caption b { color: #b0a6bd; }
+  .caption code {
+    background: #17131b; padding: 1px 5px; border-radius: 3px;
+    color: #9fd0e0; font-size: 11.5px;
+  }
+  .caption + .caption { margin-top: -8px; }
+  footer {
+    max-width: 480px; text-align: center;
+    font-size: 10.5px; color: #4a4350; line-height: 1.6;
+    border-top: 1px solid #221c29; padding-top: 14px; margin-top: 4px;
+  }
+
+  @media (prefers-color-scheme: light) {
+    html, body { background: #f4f1ea; color: #211d26; }
+    .caption { color: #5f5768; }
+    footer { color: #8b8194; border-top-color: #d6cfc2; }
+  }
+</style>
+</head>
+<body>
+
+<div class="watch">
+  <div class="bezel"></div>
+  <div class="face">
+    <div class="hearts" id="hearts"></div>
+    <div class="timer" id="timer">04:12</div>
+    <div class="timer-label">run timer</div>
+    <div class="ember-mark"></div>
+    <div class="biome">Ashfall Reach</div>
+    <div class="depth">room 6 of ~14 (sample)</div>
+    <div class="sample-pip">sample data</div>
+  </div>
+</div>
+
+<div class="badge">Static mockup — no live data channel</div>
+
+<p class="caption">
+  Every value on the face above — hearts, timer, biome name, room count —
+  is a <b>fixed sample</b>, chosen to show what a run-status view could look
+  like. Nothing here is reading a real run: the game (<code>cinder-loop.html</code>)
+  is a single offline file with no server and no network by design (L2), so
+  there is currently no channel that could tell a separate watch anything in
+  real time. The run timer above genuinely ticks — it is real elapsed time
+  since this preview loaded, not simulated gameplay.
+</p>
+<p class="caption">
+  A real live version needs one of two things neither of which exist yet:
+  a local network bridge (the desktop build optionally running a tiny status
+  server, a watch browser connecting to it over the same LAN — new
+  networking code, and a deliberate exception to L2 for this one optional
+  feature only), or a native Wear OS companion app in Kotlin using Android's
+  Data Layer API, which is a wholesale separate project in a different
+  language and toolchain, not an extension of this one.
+</p>
+
+<footer>
+  Sized to the Galaxy Watch6 Classic's native resolution — 480&times;480,
+  round 1.5&quot; AMOLED. Verified rendering with zero console errors at
+  exactly that pixel size in real headless Chromium. <b>Not verified on
+  physical Wear OS hardware</b> — no device was available to this session,
+  and Wear OS has no standard path to sideload an arbitrary HTML file the
+  way a phone browser can install a PWA, so that claim is not made here.
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  // Sample state: 2 of 3 hearts, mid-run — more legible as a design sample
+  // than a trivial full-health state. Fixed, not derived from anything.
+  var SAMPLE_HP = 2, MAX_HP = 3;
+  var heartsEl = document.getElementById('hearts');
+  for (var i = 0; i < MAX_HP; i++) {
+    var h = document.createElement('div');
+    h.className = 'heart ' + (i < SAMPLE_HP ? 'full' : 'empty');
+    heartsEl.appendChild(h);
+  }
+
+  // The one genuinely live thing on this page: real elapsed time since load,
+  // starting from the sample's 04:12 baseline. This is not simulated
+  // gameplay and does not read anything from the game — it is what it is,
+  // a clock, labelled as one.
+  var startMs = Date.now();
+  var baseSeconds = 4 * 60 + 12;
+  var timerEl = document.getElementById('timer');
+  function tick() {
+    var elapsed = Math.floor((Date.now() - startMs) / 1000);
+    var total = baseSeconds + elapsed;
+    var m = Math.floor(total / 60), s = total % 60;
+    timerEl.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  tick();
+  setInterval(tick, 250);
+})();
+</script>
+</body>
+</html>

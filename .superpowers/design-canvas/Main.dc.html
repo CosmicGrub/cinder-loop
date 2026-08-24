@@ -1,0 +1,388 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0d0b10;
+      color: #e8d8b0;
+      font-family: ui-monospace, Consolas, monospace;
+    }
+    a { color: #ff9a5c; }
+    a:hover { color: #ffd166; }
+    .page {
+      width: 960px;
+      margin: 0 auto;
+      padding: 72px 64px 120px;
+    }
+    .kicker {
+      font-size: 12px;
+      letter-spacing: 0.32em;
+      color: #8b8194;
+      text-transform: uppercase;
+    }
+    h1.title {
+      margin: 10px 0 6px;
+      font-size: 40px;
+      line-height: 1.15;
+      font-weight: 600;
+      color: #ffd166;
+      letter-spacing: 0.01em;
+    }
+    .status-line {
+      font-size: 12px;
+      color: #8b8194;
+      border-top: 1px solid #443a52;
+      padding-top: 14px;
+      margin-top: 22px;
+    }
+    .status-line b { color: #a8e6b0; font-weight: 600; }
+    h2.section-num {
+      font-size: 11px;
+      letter-spacing: 0.28em;
+      color: #ff9a5c;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+    h2.section-title {
+      font-size: 22px;
+      font-weight: 600;
+      color: #e8d8b0;
+      margin: 0 0 18px;
+    }
+    section.block {
+      margin-top: 68px;
+    }
+    p.body-copy {
+      font-size: 14px;
+      line-height: 1.75;
+      color: #cfc2a0;
+      max-width: 760px;
+    }
+    p.body-copy b { color: #e8d8b0; }
+    .panel {
+      background: rgba(24,20,29,0.96);
+      border: 1px solid #443a52;
+      padding: 26px 28px;
+    }
+    .callout {
+      background: rgba(24,20,29,0.96);
+      border: 1px solid {{accent}};
+      padding: 24px 26px;
+      margin-top: 18px;
+    }
+    .callout .label {
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: {{accent}};
+      margin-bottom: 10px;
+    }
+    .callout p { margin: 0; font-size: 14px; line-height: 1.7; color: #e8d8b0; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #a8e6b0;
+      border: 1px solid #3a5c42;
+      background: rgba(30,44,32,0.5);
+      padding: 6px 12px;
+    }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 18px; }
+    .grid-2-jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 20px; }
+    .job-card {
+      background: rgba(24,20,29,0.96);
+      border: 1px solid #443a52;
+      padding: 20px 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .job-card .icon-row { display: flex; align-items: center; gap: 10px; }
+    .job-card h3 { margin: 0; font-size: 14px; font-weight: 600; color: #ffd166; }
+    .job-card p { margin: 0; font-size: 13px; line-height: 1.65; color: #cfc2a0; }
+    .mini-col h3 {
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: {{accent}};
+      margin: 0 0 10px;
+    }
+    .mini-col p { font-size: 13px; line-height: 1.7; color: #cfc2a0; margin: 0; }
+    table.file-table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    table.file-table th {
+      text-align: left;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #8b8194;
+      border-bottom: 1px solid #443a52;
+      padding: 0 14px 10px 0;
+      font-weight: 500;
+    }
+    table.file-table td {
+      font-size: 13px;
+      color: #cfc2a0;
+      border-bottom: 1px solid rgba(68,58,82,0.5);
+      padding: 12px 14px 12px 0;
+      vertical-align: top;
+      line-height: 1.6;
+    }
+    table.file-table td.file-cell { color: #ffd166; white-space: nowrap; font-size: 13px; }
+    ul.scope-list { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+    ul.scope-list li {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; line-height: 1.6; color: #8b8194;
+      border-left: 2px solid #443a52; padding-left: 14px;
+    }
+    .footer-note {
+      margin-top: 90px;
+      border-top: 1px solid #443a52;
+      padding-top: 24px;
+    }
+    .footer-note p { font-size: 12px; line-height: 1.7; color: #6f6578; font-style: italic; margin: 0; max-width: 700px; }
+    svg.diagram { width: 100%; height: auto; display: block; margin-top: 22px; }
+  </style>
+</helmet>
+
+<div class="page">
+
+  <div class="kicker">Cinder Loop &middot; Design Spec</div>
+  <h1 class="title">Room Structure, Checkpoints<br>&amp; Cinder Banking</h1>
+  <div class="status-line">Status: <b>approved by user</b>, 2026&#8209;08&#8209;23 &middot; not yet implemented</div>
+
+  <section class="block">
+    <h2 class="section-num">01 &mdash; Goal</h2>
+    <h2 class="section-title">A level gets real internal structure</h2>
+    <p class="body-copy">A sequence of discrete rooms you fight through and clear, gated by checkpoints &mdash; instead of one continuous generated space. Modeled on Dead&nbsp;Cells / Castlevania / Hollow&nbsp;Knight room pacing, but grafted onto CINDER LOOP's own locked identity rather than replacing it.</p>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">02 &mdash; The One Decision Everything Depends On</h2>
+    <h2 class="section-title">Death still ends the run</h2>
+    <p class="body-copy">D1, this project's very first locked decision, defines the run loop as <b>spawn &rarr; clear &rarr; boss &rarr; die &rarr; spend &rarr; respawn</b>, with death as one of exactly two ways a run ends. This feature does not change that.</p>
+    <div class="callout">
+      <div class="label">Rooms &amp; checkpoints are pacing, not death-recovery</div>
+      <p>A death anywhere, in any room, still ends the whole run exactly as it does today. There is no &ldquo;resume at your last checkpoint after dying&rdquo; the way a bonfire or save crystal would work. That model was considered and explicitly rejected in favor of keeping D1 intact.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">03 &mdash; Room Graph &amp; Pacing</h2>
+    <h2 class="section-title">A linear chain: three rooms, then the boss</h2>
+    <p class="body-copy">Difficulty escalates room 1 &rarr; 2 &rarr; 3 via enemy count/composition &mdash; the same lever D2's stat scaling already uses elsewhere. The boss room is the existing boss encounter, now framed as the final room in the chain.</p>
+
+    <svg class="diagram" viewBox="0 0 900 160" xmlns="http://www.w3.org/2000/svg">
+      <line x1="70" y1="70" x2="830" y2="70" stroke="#443a52" stroke-width="2"></line>
+      <g font-family="ui-monospace, Consolas, monospace">
+        <circle cx="70" cy="70" r="26" fill="#1a1620" stroke="#8b8194" stroke-width="2"></circle>
+        <text x="70" y="75" text-anchor="middle" font-size="10" fill="#cfc2a0">SPAWN</text>
+        <text x="70" y="118" text-anchor="middle" font-size="10" fill="#6f6578">start</text>
+
+        <circle cx="260" cy="70" r="30" fill="#1a1620" stroke="#443a52" stroke-width="2"></circle>
+        <text x="260" y="75" text-anchor="middle" font-size="11" fill="#e8d8b0">ROOM 1</text>
+        <path d="M 195 70 l 10 -7 l 0 14 z" fill="#ffd166"></path>
+        <text x="195" y="118" text-anchor="middle" font-size="9" fill="#ffd166">checkpoint</text>
+
+        <circle cx="450" cy="70" r="30" fill="#1a1620" stroke="#443a52" stroke-width="2"></circle>
+        <text x="450" y="75" text-anchor="middle" font-size="11" fill="#e8d8b0">ROOM 2</text>
+        <path d="M 385 70 l 10 -7 l 0 14 z" fill="#ffd166"></path>
+        <text x="385" y="118" text-anchor="middle" font-size="9" fill="#ffd166">checkpoint</text>
+
+        <circle cx="640" cy="70" r="30" fill="#1a1620" stroke="#443a52" stroke-width="2"></circle>
+        <text x="640" y="75" text-anchor="middle" font-size="11" fill="#e8d8b0">ROOM 3</text>
+        <path d="M 575 70 l 10 -7 l 0 14 z" fill="#ffd166"></path>
+        <text x="575" y="118" text-anchor="middle" font-size="9" fill="#ffd166">checkpoint</text>
+
+        <circle cx="830" cy="70" r="32" fill="#2a1418" stroke="#ff9a5c" stroke-width="2"></circle>
+        <text x="830" y="75" text-anchor="middle" font-size="11" fill="#ff9a5c">BOSS</text>
+        <path d="M 765 70 l 10 -7 l 0 14 z" fill="#ffd166"></path>
+        <text x="765" y="118" text-anchor="middle" font-size="9" fill="#ffd166">checkpoint</text>
+      </g>
+    </svg>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">04 &mdash; Generation</h2>
+    <h2 class="section-title">Reusing what already exists</h2>
+    <div class="badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"></path></svg>
+      Reuses proven, shipped machinery
+    </div>
+    <p class="body-copy" style="margin-top:16px">The biggest risk-reducer in this whole design: <b>the mechanism this needs already exists.</b> <code style="color:#ffd166">Sim._enterLevel()</code> / <code style="color:#ffd166">Sim._enterBoss()</code> already tear down one World and load a fresh one mid-run for the level&rarr;boss transition. Room-to-room reuses that exact shape, called in a loop instead of once. Each combat room is one <code style="color:#ffd166">Gen.generate()</code> call bounded to smaller dimensions, independently fairness-audited by the same D3a machinery.</p>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">05 &mdash; Room Content</h2>
+    <h2 class="section-title">Procedural rooms, two hand-shaped exceptions</h2>
+    <div class="grid-2">
+      <div class="panel mini-col">
+        <h3>Combat rooms (&times;3)</h3>
+        <p>Fully procedural, per &sect;04. Zero new hand-authored content &mdash; needs infinite variety, so it stays generated.</p>
+      </div>
+      <div class="panel mini-col">
+        <h3>Checkpoint &amp; boss rooms</h3>
+        <p>A small number of hand-authored layouts each. A narrow, deliberate exception to &ldquo;procedural over hand-authored&rdquo; &mdash; bounded to these two room types, meant to feel designed rather than generated.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">06 &mdash; What &ldquo;Clear&rdquo; Means</h2>
+    <h2 class="section-title">Reused from D1, scoped to a room</h2>
+    <p class="body-copy">Every enemy this room placed has hp &le; 0, <b>and</b> a living player has reached the room's own exit. Reaching the door alone doesn't clear it; killing everything without reaching the door doesn't either. The door to the next room stays locked until both are true.</p>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">07 &mdash; The Checkpoint</h2>
+    <h2 class="section-title">Four things happen at once</h2>
+    <div class="grid-2-jobs">
+      <sc-for list="{{checkpointJobs}}" as="job" hint-placeholder-count="4">
+        <div class="job-card">
+          <div class="icon-row">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff9a5c" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3" fill="#ff9a5c" stroke="none"></circle></svg>
+            <h3>{{job.title}}</h3>
+          </div>
+          <p>{{job.desc}}</p>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">08 &mdash; Cinders</h2>
+    <h2 class="section-title">A resource that is genuinely at risk</h2>
+    <p class="body-copy">Distinct from currency, which stays exactly as safe as it already is &mdash; see &sect;09. Named for the game's own kiln / ash / ember vocabulary.</p>
+
+    <svg class="diagram" viewBox="0 0 900 240" xmlns="http://www.w3.org/2000/svg">
+      <g font-family="ui-monospace, Consolas, monospace">
+        <rect x="20" y="90" width="130" height="56" fill="#1a1620" stroke="#443a52" stroke-width="2"></rect>
+        <text x="85" y="112" text-anchor="middle" font-size="11" fill="#e8d8b0">Kill an</text>
+        <text x="85" y="128" text-anchor="middle" font-size="11" fill="#e8d8b0">enemy</text>
+
+        <line x1="150" y1="118" x2="220" y2="118" stroke="#443a52" stroke-width="2"></line>
+        <path d="M 220 118 l -10 -6 l 0 12 z" fill="#443a52"></path>
+
+        <rect x="230" y="90" width="150" height="56" fill="#1a1620" stroke="#443a52" stroke-width="2"></rect>
+        <text x="305" y="112" text-anchor="middle" font-size="11" fill="#e8d8b0">Cinder drops,</text>
+        <text x="305" y="128" text-anchor="middle" font-size="11" fill="#e8d8b0">carried &mdash; at risk</text>
+
+        <line x1="380" y1="118" x2="450" y2="118" stroke="#443a52" stroke-width="2"></line>
+        <path d="M 450 118 l -10 -6 l 0 12 z" fill="#443a52"></path>
+
+        <line x1="415" y1="118" x2="415" y2="60" stroke="#443a52" stroke-width="2"></line>
+        <line x1="415" y1="118" x2="415" y2="185" stroke="#443a52" stroke-width="2"></line>
+
+        <rect x="450" y="30" width="220" height="60" fill="rgba(255,154,92,0.08)" stroke="#ff9a5c" stroke-width="2"></rect>
+        <text x="560" y="55" text-anchor="middle" font-size="11" fill="#ff9a5c">Reach a checkpoint,</text>
+        <text x="560" y="71" text-anchor="middle" font-size="11" fill="#ff9a5c">interact with the tube</text>
+
+        <line x1="670" y1="60" x2="740" y2="60" stroke="#ff9a5c" stroke-width="2"></line>
+        <path d="M 740 60 l -10 -6 l 0 12 z" fill="#ff9a5c"></path>
+        <rect x="750" y="30" width="130" height="60" fill="rgba(255,209,102,0.08)" stroke="#ffd166" stroke-width="2"></rect>
+        <text x="815" y="55" text-anchor="middle" font-size="11" fill="#ffd166">Banked &rarr;</text>
+        <text x="815" y="71" text-anchor="middle" font-size="11" fill="#ffd166">real currency</text>
+
+        <rect x="450" y="155" width="220" height="60" fill="rgba(200,60,60,0.06)" stroke="#7a3a3a" stroke-width="2"></rect>
+        <text x="560" y="180" text-anchor="middle" font-size="11" fill="#c26a6a">Die before</text>
+        <text x="560" y="196" text-anchor="middle" font-size="11" fill="#c26a6a">banking</text>
+
+        <line x1="670" y1="185" x2="740" y2="185" stroke="#7a3a3a" stroke-width="2"></line>
+        <path d="M 740 185 l -10 -6 l 0 12 z" fill="#7a3a3a"></path>
+        <rect x="750" y="155" width="130" height="60" fill="rgba(0,0,0,0.2)" stroke="#5a4f52" stroke-width="2"></rect>
+        <text x="815" y="180" text-anchor="middle" font-size="11" fill="#8b8194">All carried</text>
+        <text x="815" y="196" text-anchor="middle" font-size="11" fill="#8b8194">cinders lost</text>
+      </g>
+    </svg>
+
+    <p class="body-copy" style="margin-top:22px"><b>Banking is deliberate, not automatic.</b> The checkpoint room holds a real interactable object &mdash; the pneumatic tube. Reaching it does not auto-bank cinders; the player walks up and interacts. That turns the checkpoint into a real decision: bank now for safety, or keep carrying into the next room for fewer trips, at the real risk of losing everything to one death. No multiplier for waiting &mdash; the risk itself is the whole mechanic.</p>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">09 &mdash; What Does Not Change</h2>
+    <h2 class="section-title">The existing guarantees hold</h2>
+    <div class="callout">
+      <div class="label">Untouched by this feature</div>
+      <p>Currency still converts to permanent progress at run-end on <b>either</b> death or victory &mdash; cinders are a new, riskier income stream INTO that pool, not a change to the rule. Death still ends the whole run. The permanent meta-progression store (currency, unlocked blueprints) is untouched &mdash; the new save-and-quit key is a separate, run-scoped payload.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">10 &mdash; File-Level Shape</h2>
+    <h2 class="section-title">Where this actually lands</h2>
+    <table class="file-table">
+      <thead>
+        <tr><th style="width:220px">File</th><th>Change</th></tr>
+      </thead>
+      <tbody>
+        <sc-for list="{{fileRows}}" as="row" hint-placeholder-count="7">
+          <tr>
+            <td class="file-cell">{{row.file}}</td>
+            <td>{{row.change}}</td>
+          </tr>
+        </sc-for>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="block">
+    <h2 class="section-num">11 &mdash; Out Of Scope For V1</h2>
+    <h2 class="section-title">Named, not silently deferred</h2>
+    <ul class="scope-list">
+      <sc-for list="{{outOfScope}}" as="item" hint-placeholder-count="6">
+        <li>{{item}}</li>
+      </sc-for>
+    </ul>
+  </section>
+
+  <div class="footer-note">
+    <p>Next: abilities + ability progression + character design is a separate, larger design surface. Movement, platforming and speed-based combat are already built and tested and need no new scoping &mdash; what's genuinely new is an ability system, how abilities get unlocked/upgraded (a natural connection point to the cinders economy above), and a visual character identity that reads clearly against all of it. That gets its own brainstorming pass and its own spec.</p>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#ff9a5c"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#ff9a5c';
+    return {
+      accent: accent,
+      checkpointJobs: [
+        { title: 'Gates the room graph', desc: 'The door to the next room stays locked until every enemy here is down and a living player reaches the exit.' },
+        { title: 'Save-and-quit resume', desc: 'The run survives a reload for the first time — you come back at this checkpoint, freshly regenerated, never mid-fight.' },
+        { title: 'Heal + narrative beat', desc: 'A partial heal, a Kilnkeeper line, a checkpoint cue — the same trigger shape narrative and audio already use.' },
+        { title: 'Blueprint hand-in', desc: 'A checkpoint IS a transition in D4’s own sense — a carried blueprint can cash in here, not only at the very end of a level.' }
+      ],
+      fileRows: [
+        { file: '50-gen.js', change: 'A room-bounded generate() — same D3a fairness audit, smaller inputs.' },
+        { file: '60-run.js', change: 'Room index/count, per-room seed derivation, room-scoped clear check.' },
+        { file: '70-sim.js', change: '_enterRoom(i), modeled on the existing _enterLevel()/_enterBoss(). Shared blueprint hand-in helper. carriedCinders field + bank interaction.' },
+        { file: '10-data.js', change: 'One new narrator pool entry. One new SFX cue.' },
+        { file: '82-narrative.js / 85-audio.js', change: 'Trigger wiring — same shape as what already exists.' },
+        { file: 'new small module', change: 'The run-scoped save-and-quit key, parallel to Settings/Meta.' },
+        { file: '95-app.js', change: 'boot() checks the save-and-quit key before beginRun().' }
+      ],
+      outOfScope: [
+        'Branching rooms — the graph stays a linear chain',
+        'Hand-authored combat rooms — only checkpoint + boss rooms are hand-shaped',
+        'Mid-fight resume — you always resume AT a checkpoint',
+        'Any change to death ending the run',
+        'A bank-more-for-a-bonus multiplier — the risk itself is the mechanic',
+        'Exact tunable numbers — drop chance, conversion rate, heal amount stay CFG constants, decided during playtesting'
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

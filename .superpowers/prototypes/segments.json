@@ -1,0 +1,86 @@
+[
+  {
+    "name": "run",
+    "caption": "RUN",
+    "dir": "frames\\01-run",
+    "frames": 14
+  },
+  {
+    "name": "jump",
+    "caption": "JUMP + DOUBLE JUMP",
+    "dir": "frames\\02-jump",
+    "frames": 16
+  },
+  {
+    "name": "wall",
+    "caption": "WALL SLIDE + WALL JUMP",
+    "dir": "frames\\03-wall",
+    "frames": 26
+  },
+  {
+    "name": "crouch",
+    "caption": "CROUCH — fits under the low tunnel",
+    "dir": "frames\\04-crouch",
+    "frames": 35
+  },
+  {
+    "name": "roll",
+    "caption": "ROLL — the fast way under",
+    "dir": "frames\\05-roll",
+    "frames": 13
+  },
+  {
+    "name": "slam",
+    "caption": "SLAM — ground pound",
+    "dir": "frames\\06-slam",
+    "frames": 17
+  },
+  {
+    "name": "light",
+    "caption": "BLADE — light chain",
+    "dir": "frames\\07-light",
+    "frames": 18
+  },
+  {
+    "name": "heavy-blade",
+    "caption": "BLADE — heavy",
+    "dir": "frames\\08-heavy-blade",
+    "frames": 10
+  },
+  {
+    "name": "light-daggers",
+    "caption": "TWIN DAGGERS — light (weapon set directly; runtime switching not shipped yet)",
+    "dir": "frames\\09-light-daggers",
+    "frames": 15
+  },
+  {
+    "name": "heavy-daggers",
+    "caption": "TWIN DAGGERS — heavy",
+    "dir": "frames\\10-heavy-daggers",
+    "frames": 9
+  },
+  {
+    "name": "light-warmaul",
+    "caption": "WARMAUL — light (weapon set directly; runtime switching not shipped yet)",
+    "dir": "frames\\11-light-warmaul",
+    "frames": 15
+  },
+  {
+    "name": "heavy-warmaul",
+    "caption": "WARMAUL — heavy",
+    "dir": "frames\\12-heavy-warmaul",
+    "frames": 9
+  },
+  {
+    "name": "light-thornspear",
+    "caption": "THORNSPEAR — light (weapon set directly; runtime switching not shipped yet)",
+    "dir": "frames\\13-light-thornspear",
+    "frames": 15
+  },
+  {
+    "name": "heavy-thornspear",
+    "caption": "THORNSPEAR — heavy",
+    "dir": "frames\\14-heavy-thornspear",
+    "frames": 9
+  }
+]

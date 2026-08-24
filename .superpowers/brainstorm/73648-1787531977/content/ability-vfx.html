@@ -1,0 +1,69 @@
+<h2>How do Dash and Parry read on the existing figure?</h2>
+<p class="subtitle">Built on the real "ash-cloth over a banked ember" identity — same hood, same cloak, same ember dot, just reacting.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Ember Dash</div>
+    <div class="mockup-body">
+      <svg viewBox="0 0 320 140" style="width:100%;background:#0d0b10">
+        <!-- trail -->
+        <g opacity="0.35">
+          <ellipse cx="60" cy="90" rx="26" ry="14" fill="#d1495b"/>
+          <ellipse cx="95" cy="90" rx="22" ry="12" fill="#d1495b" opacity="0.7"/>
+          <ellipse cx="125" cy="90" rx="16" ry="9" fill="#d1495b" opacity="0.4"/>
+        </g>
+        <!-- figure mid-dash: streaked cloak -->
+        <path d="M 170 60 L 230 65 L 210 100 L 155 95 Z" fill="#7d6d52"/>
+        <path d="M 168 55 L 178 48 L 176 62 Z" fill="#e8d8b0"/>
+        <line x1="176" y1="68" x2="158" y2="100" stroke="#b09775" stroke-width="4"/>
+        <line x1="180" y1="66" x2="200" y2="102" stroke="#6a5c47" stroke-width="4"/>
+        <circle cx="182" cy="48" r="11" fill="#221c29"/>
+        <circle cx="185" cy="47" r="9" fill="#221c29"/>
+        <rect x="187" y="43" width="4" height="4" fill="#fff4d6"/>
+        <text x="200" y="130" font-size="10" fill="#8b8194" font-family="ui-monospace,monospace" text-anchor="middle">ember dot flares white-hot; a fading ember trail (existing particle system) marks the burst</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Parry — the moment it lands</div>
+    <div class="mockup-body">
+      <svg viewBox="0 0 320 140" style="width:100%;background:#0d0b10">
+        <!-- radiating flash -->
+        <circle cx="160" cy="60" r="46" fill="none" stroke="#d1495b" stroke-width="2" opacity="0.5"/>
+        <circle cx="160" cy="60" r="30" fill="none" stroke="#fff4d6" stroke-width="2" opacity="0.7"/>
+        <!-- figure, hood lit from within -->
+        <path d="M 130 60 L 190 65 L 175 100 L 118 95 Z" fill="#7d6d52"/>
+        <circle cx="150" cy="48" r="12" fill="#221c29"/>
+        <circle cx="150" cy="48" r="10" fill="#4a2530"/>
+        <rect x="146" y="43" width="7" height="7" fill="#fff4d6"/>
+        <line x1="144" y1="68" x2="128" y2="100" stroke="#b09775" stroke-width="4"/>
+        <line x1="156" y1="66" x2="172" y2="102" stroke="#6a5c47" stroke-width="4"/>
+        <!-- deflected attack streak -->
+        <line x1="230" y1="30" x2="185" y2="55" stroke="#8b8194" stroke-width="3" stroke-dasharray="4 3"/>
+        <text x="160" y="130" font-size="10" fill="#8b8194" font-family="ui-monospace,monospace" text-anchor="middle">the whole hood-hollow lights up on a good read, not just the usual single ember dot</text>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p><b>Both reuse real, existing machinery</b> — the particle system 80-view.js already owns (renderer/camera/particles per this project's own architecture) for the dash trail, and the same "something flashes at the moment of impact" precedent an ordinary hit already uses for the parry flash. No new rendering subsystem, just new triggers into what's already there.</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="good" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>This direction works</h3>
+      <p>Keep building on this — same figure, same palette, reacting to the new abilities.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="adjust" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Close, but adjust something</h3>
+      <p>Tell me what to change in the terminal.</p>
+    </div>
+  </div>
+</div>

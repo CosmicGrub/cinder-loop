@@ -1,0 +1,1654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CINDER LOOP — Visual Map</title>
+<style>
+  :root {
+    --bg: #0d0b10;
+    --panel: #16131b;
+    --panel2: #1d1925;
+    --line: #2e2836;
+    --ink: #e8d8b0;
+    --dim: #8b8194;
+    --faint: #5c5468;
+    --built: #8fc0d0;
+    --unbuilt: #57505f;
+    --hot: #d1495b;
+    --gold: #c9a227;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f1ea; --panel: #fffdf8; --panel2: #ebe6dc; --line: #d6cfc2;
+      --ink: #211d26; --dim: #5f5768; --faint: #8b8194;
+      --built: #1f6b85; --unbuilt: #a79ead; --hot: #a8283a; --gold: #8a6f10;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0b10; --panel: #16131b; --panel2: #1d1925; --line: #2e2836;
+    --ink: #e8d8b0; --dim: #8b8194; --faint: #5c5468;
+    --built: #8fc0d0; --unbuilt: #57505f; --hot: #d1495b; --gold: #c9a227;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f1ea; --panel: #fffdf8; --panel2: #ebe6dc; --line: #d6cfc2;
+    --ink: #211d26; --dim: #5f5768; --faint: #8b8194;
+    --built: #1f6b85; --unbuilt: #a79ead; --hot: #a8283a; --gold: #8a6f10;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 14px; line-height: 1.55;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 28px; }
+  h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: .14em; }
+  .sub { color: var(--dim); font-size: 12.5px; }
+  .status {
+    display: inline-block; margin-top: 12px; padding: 5px 12px;
+    border: 1px solid var(--built); color: var(--built);
+    border-radius: 3px; font-size: 12px; letter-spacing: .08em;
+  }
+
+  h2 {
+    font-size: 12px; letter-spacing: .2em; color: var(--faint);
+    text-transform: uppercase; margin: 34px 0 12px; font-weight: 600;
+  }
+
+  .stack { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .row {
+    display: grid; grid-template-columns: 132px 1fr 74px;
+    gap: 12px; align-items: baseline;
+    padding: 7px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row.off { background: var(--panel2); color: var(--unbuilt); }
+  .row .file { color: var(--built); }
+  .row.off .file { color: var(--unbuilt); }
+  .row .what { color: var(--dim); font-size: 12.5px; }
+  .row.off .what { color: var(--unbuilt); }
+  .tag {
+    text-align: right; font-size: 10.5px; letter-spacing: .1em;
+    color: var(--built);
+  }
+  .row.off .tag { color: var(--unbuilt); }
+
+  .boundary {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px; background: var(--bg);
+    border-top: 1px dashed var(--gold); border-bottom: 1px dashed var(--gold);
+    color: var(--gold); font-size: 11px; letter-spacing: .16em;
+  }
+  .boundary span { white-space: nowrap; }
+  .boundary i { flex: 1; height: 1px; background: var(--gold); opacity: .35; font-size: 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 12px; }
+  .card {
+    border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); padding: 14px 16px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 13px; color: var(--ink); }
+  .card .n { font-size: 26px; color: var(--built); line-height: 1.1; }
+  .card p { margin: 8px 0 0; font-size: 12px; color: var(--dim); }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); }
+  th { color: var(--faint); font-weight: 600; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  td.v { color: var(--built); white-space: nowrap; }
+  td.h { color: var(--dim); font-size: 12px; }
+
+  .note {
+    border-left: 2px solid var(--hot); background: var(--panel);
+    padding: 12px 16px; margin: 14px 0 0; font-size: 12.5px; color: var(--dim);
+  }
+  .note b { color: var(--hot); font-weight: 600; }
+  footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
+           color: var(--faint); font-size: 11.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>CINDER LOOP</h1>
+  <div class="sub">Visual map &middot; companion to CINDER_LOOP_MASTERFILE.md and CINDER_LOOP_CHANGELOG.md</div>
+  <div class="status">v0.2.17 &middot; 2026-08-23 &middot; GREEN 2262/2262 &middot; Ember Dash and Parry &mdash; abilities, enhancements, full input/VFX/SFX wiring (D13)</div>
+</header>
+
+<h2>Module stack &mdash; strict one-way dependency</h2>
+<div class="stack">
+  <div class="row"><span class="file">00-core.js</span><span class="what">RNG (per-instance seeded) &middot; Bus (typed) &middot; CFG (every tunable) &middot; math</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">05-input.js</span><span class="what">Pad / Pads &mdash; N-player array, first-press-safe edges, pending buffer, parry button + WINDOW entry (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">10-data.js</span><span class="what">tables: enemy roster (D9, 4 templates), weapons (D7/D9, 4 &mdash; roster complete). grafts still to come</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">20-world.js</span><span class="what">tilemap: empty / solid / one-way / hazard + queries</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">25-body.js</span><span class="what">AABB, axis-separated collision, sub-stepped, one-way + drop-through</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">30-player.js</span><span class="what">run, jump, double jump, wall slide/jump, ledge grab/mantle, roll, crouch, slam, hazards, death, respawn, D2 stats + gainStat(), Ember Dash + Parry window (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">35-rig.js</span><span class="what">skeletal poses, hitbox bake at boot, overreach audit (L9, D6)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">40-combat.js</span><span class="what">attack machine, hit resolution, combos, cancels, hitstop policy, D2 weapon scaling, slam impact, parry negate+stagger + Riposte/Reflect hooks (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">45-enemy.js</span><span class="what">enemy entities, per-instance-seeded brains, the fairness rule, stagger() + 'staggered' state (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">50-gen.js</span><span class="what">procedural generator + fairness audit (D3a)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">55-boss.js</span><span class="what">Kilnwarden &mdash; two-phase boss + arena, kept OUT of DATA.ENEMIES (D9)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">60-run.js</span><span class="what">run loop: spawn &rarr; clear &rarr; boss &rarr; death &rarr; spend &rarr; respawn (D1)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">65-meta.js</span><span class="what">persistence, blueprints, +max HP capability unlock (D4/D8), four Dash/Parry enhancement flags (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13)</span><span class="tag">BUILT</span></div>
+  <div class="boundary"><span>PRESENTER BOUNDARY &mdash; L5</span><i>.</i><span>nothing above may know anything below</span></div>
+  <div class="row"><span class="file">80-view.js</span><span class="what">the ONLY place an event becomes an effect: renderer, camera rig, particles, dashStart/parry bursts + per-player parryGlow (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">85-audio.js</span><span class="what">synthesized Web Audio + real mute toggle, off the SFX table (D7/D11), +dashStart/parry cues (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">90-settings.js</span><span class="what">settings model: sanitize / serialize / rebind, storage-agnostic, touchParryAssist (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">92-menu.js</span><span class="what">in-canvas pause / options menu &mdash; chrome only, no sim knowledge, Touch Parry Assist row (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">94-touch.js</span><span class="what">touch input: zoneAt + Stick hysteresis (pure) + DOM shell (D10), PARRY zone + Assist wiring (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">95-app.js</span><span class="what">boot, accumulator, keyboard + gamepad, pause, DPR resize, lazy touch layer, parry gamepad binding + F7-F10 debug buys (D13)</span><span class="tag">BUILT</span></div>
+</div>
+
+<h2>The gate &mdash; tests/run_all.sh</h2>
+<div class="grid">
+  <div class="card">
+    <h3>verify_arch</h3>
+    <div class="n">215</div>
+    <p>Sim purity in a bare sandbox. No browser globals, Math.random or dt in
+       any sim module. The presenter never assigns sim state. 900 ticks with
+       and without a presenter are byte-identical. Hitstop does not eat input.
+       resetTransient() restores a fresh sim exactly. The suite proves it can
+       fail. Since v0.2.17 (D13): a grounded roll's own particles proven
+       finite, and a real run proven to produce finite footstep-dust
+       particles &mdash; two sibling NaN-particle regressions.</p>
+  </div>
+  <div class="card">
+    <h3>verify_core</h3>
+    <div class="n">55</div>
+    <p>RNG determinism, per-instance divergence, snapshot restore. Bus
+       semantics, typed rejection, listener isolation. World queries,
+       out-of-bounds rules, half-open spans, text round-trip. Config sanity.
+       Sim determinism over 600 ticks.</p>
+  </div>
+  <div class="card">
+    <h3>verify_move</h3>
+    <div class="n">202</div>
+    <p>Every movement mechanic measured by driving the sim, never recomputed
+       from CFG. Plus a 1200-tick stress run asserting the body never ends a
+       tick inside a solid tile. Since v0.2.8: wall slide clamps to exactly
+       2.2 px/frame while held into a wall, never engages while merely
+       brushing one; wall jump matches a normal jump's apex exactly (reuses
+       JUMP_VEL) and outranks the double jump, proven by spending the
+       double jump first and confirming a wall jump still fires with zero
+       left. Since v0.2.12: a falling body genuinely held into a real ledge
+       catches it, positioned and event-fired exactly once; touching but not
+       holding never grabs; a tall wall with no ledge anywhere reachable
+       never grabs; a ledge with no headroom above it never grabs; climbing
+       re-grounds the body the SAME tick, not one tick later, with the air
+       jump refreshed; the auto-drop timeout and the re-grab lockout's real
+       boundary both measured directly, not asserted from config;
+       determinism over a full grab-hang-climb sequence. Since v0.2.17
+       (D13): Ember Dash measured the same way (14 frames, 77px, blocked on
+       cooldown, i-frames through a real hit mid-dash); Parry's window/
+       cooldown/whiff-arms-cooldown timing, plus a direct regression for the
+       Pad.BUTTONS/WINDOW two-map silent-failure trap.</p>
+  </div>
+  <div class="card">
+    <h3>verify_rig</h3>
+    <div class="n">148</div>
+    <p>The bake and the audit that guards it. Frame counts and derived active
+       windows pinned; boxes on exactly the swinging frames, frozen; the move
+       table declares no hitboxes at all. Every audit rule is fired at a
+       poisoned bake and must catch it. The figure posed every tick of a
+       1500-tick run &mdash; every state, including v0.2.8's new wallSlide,
+       once missing this exact assertion caught it. Also bakes and audits an
+       ENEMY move on its own proportions and, since v0.2.10, all THREE
+       non-default WEAPONS' moves on their own geometry. Reach proven
+       strictly ordered across the whole four-weapon roster; the 13-damage
+       light-chain total proven for all four, not assumed from three; the
+       real merged-table envelope re-measured and proven still inside the
+       long-standing 20&ndash;40px "two tiles, not ten" ceiling &mdash; the
+       assertion that actually caught Thornspear's first-draft blade as too
+       long before it ever shipped. Since v0.2.12: a real ledgeGrab reached
+       on a real constructed world and posed directly &mdash; closing a gap
+       the 1500-tick sweep above cannot close on its own, since flatWorld has
+       no wall that ever ends into a ledge.</p>
+  </div>
+  <div class="card">
+    <h3>verify_combat</h3>
+    <div class="n">109</div>
+    <p>Hits land where the blade is, once per move, mirrored by facing,
+       anchored to the feet when crouching. I-frames, hitstop, combo chaining,
+       roll and death cancels, attack drift, and 700 ticks of scripted
+       fighting reproducing byte-identically. Since v0.2.8: equipping Twin
+       Daggers changes both attack buttons' opening move; its own three-hit
+       chain proven with the buffered-early-press technique, not the helper
+       built to prove a chain's absence; real damage through the unmodified
+       resolver; determinism with a second weapon equipped. Since v0.2.10:
+       Warmaul and Thornspear equip the same way; three repeated Warmaul
+       swings prove chain:null behaves as a clean repeatable single hit, not
+       a swallowed buffered press &mdash; plus a second test reaching the
+       mid-swing branch the first one structurally cannot, added after a
+       mutation test proved the gap real; Thornspear's four-hit chain proven
+       the same buffered-early-press way, one hit further than Daggers';
+       real damage through the resolver for maulA (the biggest LIGHT hit in
+       the game) and separately maulHeavy (the biggest hit in the whole
+       game &mdash; the first version of this claim named the wrong move);
+       determinism with each new weapon equipped. Since v0.2.11: slam
+       impact &mdash; real damage on both AOE boxes independently, a target
+       just past either box's outer edge takes none, the VERTICAL reach
+       proven too (a target pinned above the band takes nothing, one
+       pinned inside it does &mdash; an adversarially-found gap, since every
+       other dummy in the section rests on the floor where its own height
+       already spans nearly any plausible value), knockback proven to
+       push each side AWAY from the landing point (why it's two resolveBox
+       calls, not one), hitstop scales with whether it actually connected,
+       weapon-scaling proven through a raised stat, the one-tick flag
+       proven not to re-fire, i-frames respected, determinism with a real
+       landed slam.</p>
+  </div>
+  <div class="card">
+    <h3>verify_stats</h3>
+    <div class="n">41</div>
+    <p>D2's stat contract measured against the real sim, not re-derived.
+       Dominance proven strict: catching up to exactly tie the leader
+       grants no HP, only overtaking it does. pickStatColour's weighting
+       proven over 3000 real seeded draws, both a leader-ahead case and a
+       genuine three-way tie. Combat.weaponScale's pure formula plus its
+       live integration through unmodified resolveBox. Real pickup
+       collision, one-time collection, resetTransient() restoring an
+       uncollected world, and a full run's determinism. Caught its own
+       vacuous pass: two negative-property tests were green only because
+       the first draft never actually drove the player into the pickup.</p>
+  </div>
+  <div class="card">
+    <h3>verify_enemy</h3>
+    <div class="n">132</div>
+    <p>The 4-template roster and the fairness rule. Every template commits its
+       facing at telegraph and cannot revise it &mdash; asserted by running the
+       player hard the other way after each enemy commits. Contact damage on
+       only while actually dangerous. Per-instance seeding. 900-tick
+       determinism with a full roster fighting. Since v0.2.17 (D13):
+       Enemy.prototype.stagger()'s idempotency (co-op's two-players-one-
+       hitbox case produces exactly one stagger, not two); dangerous() false
+       while staggered; a staggered enemy's in-flight attack cleared so no
+       delayed hit lands; a staggered enemy still reaches recover and is
+       still eligible afterward.</p>
+  </div>
+  <div class="card">
+    <h3>verify_boss</h3>
+    <div class="n">73</div>
+    <p>Kilnwarden. Confirmed absent from DATA.ENEMIES/ENEMY_IDS (D9 stays
+       exactly four). The move-picker's eligible pool proven never empty by
+       a real distance sweep across the whole arena, not by inspection. The
+       fairness dodge test against every move in both phases. The phase
+       transition proven to trigger only at a safe point, run exactly its
+       declared length, and never be dangerous. The arena hazard read off
+       the real World directly, on schedule, reverting on schedule &mdash; a
+       player standing in a live vent takes real damage through the same
+       generic hazard path every other tile uses. Found a real interaction
+       with pre-existing behavior, not a boss bug: a shot already in flight
+       can connect with the player mid-transition, and the game's existing
+       8-tick impact hitstop then freezes the whole sim &mdash; the first
+       draft of this suite counted frozen ticks as transition progress and
+       failed until it measured only real ticks instead. Since v0.2.17
+       (D13): a real parry stagger still reaches recover and is still
+       eligible for a boss phase-transition check afterward.</p>
+  </div>
+  <div class="card">
+    <h3>verify_gen</h3>
+    <div class="n">56</div>
+    <p>The capability model, the DIRECTED reachability graph/BFS, the audit,
+       and the generator itself, then the strongest claim in the suite: a
+       real physics prover attempts every edge the audit calls legal in an
+       isolated two-platform world, five distinct landing techniques tried
+       per edge &mdash; 174/174 real generated edges physically confirmed.
+       Found a real bug: the audit was calling a rise-5 double-jump climb
+       "legal" at a gap the true minimum measurement showed could not
+       actually be cleared.</p>
+  </div>
+  <div class="card">
+    <h3>verify_run</h3>
+    <div class="n">118</div>
+    <p>D1, new suite v0.2.13. Two layers matching verify_gen's own precedent:
+       pure RunLogic first, real Sim/Player/Enemy integration second &mdash;
+       proving 70-sim.js actually wires the pure logic in, not just that it
+       is self-consistent. A full clear opens the boss door with no free
+       heal at the threshold; a boss victory pauses exactly
+       CFG.RESPAWN_FRAMES before the next level commits; death mid-level
+       still pays out currency for kills already banked; co-op death never
+       force-kills the survivor, and a staggered co-op death survives both
+       the level commit and a subsequent boss transition. A dedicated
+       adversarial pass (&sect;5l) found and fixed six real bugs, including
+       a boot-path dummy banking phantom kills and 500 derived levels swept
+       for repeats.</p>
+  </div>
+  <div class="card">
+    <h3>verify_meta</h3>
+    <div class="n">265</div>
+    <p>D4/D8, new suite v0.2.14. Pure MetaLogic first, real Sim/Player
+       integration second. buyMaxHp() refuses when unaffordable, grows hp
+       AND maxHp immediately, stacks, survives a real beginRun() restart;
+       enforceLocks correctly drops only unlocked weapons; a boss victory
+       hands in an affordable blueprint and refuses an unaffordable one
+       without banking it; a co-op commit proves BOTH D4 outcomes at once
+       with real per-player payloads. A dedicated adversarial pass
+       (&sect;5m) found and fixed four real bugs, including two Sims
+       sharing a caller-supplied Meta object's own unlocked set. Since
+       v0.2.17 (D13): each of the four Dash/Parry enhancement spendOnX/buyX
+       pairs proven through the identical buyMaxHp shape &mdash; refuses,
+       double-purchase guard, live top-up, hash() coverage.</p>
+  </div>
+  <div class="card">
+    <h3>verify_narrative</h3>
+    <div class="n">65</div>
+    <p>D11/D12, new suite v0.2.15. Pure trigger logic against a hand-built
+       fake sim fixture (L8). Every narrator pool and every enemy's bark
+       pool non-empty; the FIRST boss entry fires the reveal and flips
+       revealed, a SECOND fires the ordinary line instead; a same-tick
+       fatal-boss-trade reads as death, never victory; TTL counts down by
+       real elapsed ms. A dedicated adversarial pass (&sect;5n) found and
+       fixed five real bugs, including a boss-phase death that could show
+       a triumphant victory line.</p>
+  </div>
+  <div class="card">
+    <h3>verify_audio</h3>
+    <div class="n">338</div>
+    <p>D11, new suite v0.2.16. Pure logic against a hand-built fake
+       AudioContext (L8), never a real one. Every SFX cue's shape proven;
+       every real Bus event outside the curated trigger list proven silent.
+       Mute suppression, unlock() across suspended/running/no-support
+       states, graceful degradation with zero Web Audio support. A
+       dedicated adversarial pass (&sect;5o) added an instrumentedCtx()
+       fixture that catches real gain/waveform/sweep/filter mutations the
+       original 191 assertions missed entirely. Since v0.2.17 (D13): the
+       two new dashStart/parry cues proven the identical way.</p>
+  </div>
+  <div class="card">
+    <h3>verify_platform</h3>
+    <div class="n">207</div>
+    <p>The settings sanitizer and pause menu, tested against the real
+       functions, never reimplemented. Every corrupted-payload shape a hand-
+       edited localStorage value could take. The two-pass keybind-collision
+       fix, pinned directly. The menu state machine driven through the same
+       handleKey() a player uses. Since v0.2.17 (D13): a new "Touch Parry
+       Assist: On/Off" row and touchParryAssist across defaults/sanitize;
+       every hardcoded confirm() cursor offset re-derived and checked
+       against the row it actually labels.</p>
+  </div>
+  <div class="card">
+    <h3>verify_touch</h3>
+    <div class="n">93</div>
+    <p>zoneAt boundaries and the Stick hysteresis (enter 14px / exit 8px,
+       independent axes, direct reversal). TouchControls driven directly via
+       fake touch events &mdash; no browser needed for logic this pure. Pins
+       the two properties a judged design panel flagged as bugs in its own
+       winning proposal: ghost-promotion can never cross zones, action zones
+       are refcounted. Caught a real bug in its own first draft: for...in
+       yields string keys, silently breaking movement after a promotion.</p>
+  </div>
+  <div class="card">
+    <h3>verify_render</h3>
+    <div class="n">145</div>
+    <p>Real headless Chromium over raw CDP, zero npm dependencies. Canvas laid
+       out, sim ticking in real time, keystrokes moving the character, a swing
+       taking exactly the documented damage off a dummy, the pause menu
+       provably stopping and resuming the sim, five device-metric overrides
+       proving resize actually tracks the real viewport, a real localStorage
+       round trip surviving a reload, the PWA manifest fetched and parsed for
+       real, REAL dispatched touch events driving an actual drag/jump/heavy-
+       attack/pause-tap through the live sim, a composited screenshot (L12),
+       zero console errors. Since v0.2.17 (D13): a real airborne roll-key
+       press produces a real dash with finite, spark-colored particles; a
+       real parry event arms and decays the hood-glow timer. Hardened by
+       this release's own dedicated gate-stability pass: the live-state
+       check raced against the dash's own short duration plus CDP round-trip
+       latency (fixed with the far more durable dashCd&nbsp;&gt;&nbsp;0
+       signal), and the roll/dash input buffer's real 133ms window was found,
+       under measured heavy machine load, to sometimes miss a genuinely late
+       real keypress (fixed with a bounded real-retry around the whole
+       jump-then-roll-press sequence).</p>
+  </div>
+</div>
+
+<div class="note">
+  <b>Only verify_render caught the worst bug (v0.1.0).</b> The demo spawn used
+  <code>TILE&nbsp;*&nbsp;3</code> &mdash; the tile-<i>kind</i> enum rather than
+  <code>CFG.TILE</code>, the tile <i>size</i>. The spawn was NaN and the player
+  fell forever past a world he could never touch. All 255 sim assertions of the
+  day were green, because the suites build their own worlds and never load the
+  demo level. This is the argument for a browser gate.
+</div>
+
+<div class="note">
+  <b>The same argument, twice more, in one pass (v0.2.2).</b> A DPR resize
+  edit closed a <code>/* */</code> comment one sentence early; the trailing
+  prose fell out and became bare JavaScript, failing the ENTIRE assembled
+  script to parse. All 654 sim-side assertions across 7 suites stayed green,
+  because none of them load the built HTML &mdash; only <code>verify_render</code>
+  does. <code>build.py</code> now runs <code>node&nbsp;&#8209;&#8209;check</code>
+  against the assembled script before writing it, so a syntax error fails the
+  BUILD, at the edit, not several tool calls later inside a browser.
+  <br><br>
+  The <i>same edit</i> also broke real window resizing, in production, not
+  just a test: it pinned <code>canvas.style.width/height</code> to a fixed
+  pixel value, which outranks the stylesheet's <code>width:100%</code> rule
+  once set, so the canvas's own <code>clientWidth</code> stopped measuring its
+  container and just echoed back whatever had last been written &mdash;
+  silently freezing the game at its boot-time size forever after. Caught only
+  because a resize assertion checked <code>clientWidth</code> before and after
+  a REAL viewport change and found it had not moved; an earlier version of
+  that same assertion checked only "stays finite," which stayed true whether
+  or not the resize was actually happening. Fixed by removing the pin
+  entirely &mdash; the stylesheet rule was already sufficient.
+  <br><br>
+  <b>A third instance, same lesson, smaller blast radius (v0.2.3).</b> Ghost
+  promotion in the touch layer set <code>stickOwner</code> from a
+  <code>for...in</code> loop's own key &mdash; which is ALWAYS a string,
+  even when the original property name was the number a real
+  <code>Touch.identifier</code> always is. Every subsequent
+  <code>touchmove</code>'s strict <code>t.identifier === this.stickOwner</code>
+  check (<code>2 === "2"</code>) would then permanently fail, freezing
+  movement the instant a promotion happened. An assertion that only checked
+  "did a promotion occur" passed; only a second assertion that dispatched an
+  actual <code>touchmove</code> through the promoted ghost and confirmed the
+  pad still responded caught it. The pattern across all three bugs this
+  session: checking that a FLAG changed is not the same claim as checking
+  that the THING THE FLAG WAS FOR still works.
+</div>
+
+<h2>Combat &mdash; active windows are derived, never typed</h2>
+<div class="scroll">
+<table>
+  <tr><th>Move</th><th>Frames</th><th>Active</th><th>Damage</th><th>Hitstop</th><th>Input</th></tr>
+  <tr><td>slashA</td><td class="v">10</td><td class="v">4&ndash;6</td><td class="v">6</td><td class="v">5</td><td class="h">attack</td></tr>
+  <tr><td>slashB</td><td class="v">8</td><td class="v">3&ndash;5</td><td class="v">7</td><td class="v">5</td><td class="h">attack again, from frame 7 of slashA</td></tr>
+  <tr><td>heavy</td><td class="v">16</td><td class="v">9&ndash;11</td><td class="v">14</td><td class="v">9</td><td class="h">crouch + attack</td></tr>
+  <tr><td>clawA <span class="h">(Ashwalker)</span></td><td class="v">11</td><td class="v">5&ndash;7</td><td class="v">1</td><td class="v">3</td><td class="h">enemy melee &mdash; baked on ITS OWN 12&times;24 geometry, not the player's</td></tr>
+  <tr><td>maulA <span class="h">(Warmaul)</span></td><td class="v">13</td><td class="v">7&ndash;9</td><td class="v">13</td><td class="v">9</td><td class="h">one committed hit &mdash; chain: null, no combo at all</td></tr>
+  <tr><td>spearA <span class="h">(Thornspear)</span></td><td class="v">8</td><td class="v">4&ndash;6</td><td class="v">3</td><td class="v">5</td><td class="h">first of a four-hit chain &mdash; longest reach in the roster</td></tr>
+  <tr><td>Reach envelope</td><td class="v" colspan="2">38.65 px</td><td class="h" colspan="3">max of ALL four weapons' baked poses together &mdash; measured against a 20&ndash;40px ceiling, not just read as fine</td></tr>
+  <tr><td>Hitboxes in the game</td><td class="v" colspan="2">40</td><td class="h" colspan="3">one per swinging frame &middot; zero authored, across 15 moves (4 weapons + 1 enemy)</td></tr>
+  <tr><td>Hits per target per move</td><td class="v" colspan="2">1</td><td class="h" colspan="3">asserted across a 3-frame active window</td></tr>
+  <tr><td>Target i-frames</td><td class="v" colspan="2">24 frames</td><td class="h" colspan="3">measured off the target's counter, not a tick budget</td></tr>
+  <tr><td>Attack drift</td><td class="v" colspan="2">0.35&times;</td><td class="h" colspan="3">ground control kept while swinging</td></tr>
+  <tr><td>Attack latency</td><td class="v" colspan="2">0 frames</td><td class="h" colspan="3">the swing starts on the tick the button goes down</td></tr>
+  <tr><td>Parry <span class="h">(D13)</span></td><td class="v" colspan="2">12-frame window, 30-frame cooldown &mdash; whiff only</td><td class="h" colspan="3">negates one hit and staggers the source &mdash; a timed flag (parryWindow/parryCd), never its own committed state, resolved directly inside Combat.resolveBox</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <b>A frame carries a hitbox when the blade tip moves faster than 12&nbsp;px
+  per tick.</b> That is the entire rule. Startup, active and recovery are
+  consequences of the animation rather than numbers anyone types &mdash; windup
+  may legally swing the blade behind the character, it just moves too slowly to
+  carry a box. Because boxes derived this way are structurally hard to violate,
+  <code>verify_rig</code> fires every audit rule at a deliberately poisoned
+  bake: an inflated box, a one-pixel pad, a box reaching behind, a box
+  lingering on a still frame, a move that cannot hit, an authored hitbox
+  smuggled into the data. Each must be caught &mdash; and a clean copy of the
+  same shape must stay clean.
+</div>
+
+<h2>Enemy roster (D9) &mdash; four templates, one fairness rule</h2>
+<div class="scroll">
+<table>
+  <tr><th>Template</th><th>Primitive</th><th>Teaches</th></tr>
+  <tr><td>Ashwalker</td><td class="v">walk + melee</td><td class="h">the baseline &mdash; every other enemy is read against this one</td></tr>
+  <tr><td>Emberrush</td><td class="v">walk + charge</td><td class="h">roll THROUGH it; the long recovery after a whiff is the punish window</td></tr>
+  <tr><td>Kilnspitter</td><td class="v">shoot (stationary)</td><td class="h">keep moving &mdash; an ember that dies on terrain or a 150-frame timer</td></tr>
+  <tr><td>Wickmoth</td><td class="v">fly + dive</td><td class="h">gives the jump and double jump a combat purpose</td></tr>
+  <tr><td>Telegraph floor</td><td class="v" colspan="2">14 frames minimum, every template</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <b>An enemy commits its facing at the start of its telegraph and cannot
+  revise it.</b> That is the entire fairness rule, and it is the whole design.
+  <code>verify_enemy</code>'s dodge test commits an attack, then runs the
+  player hard the other way for the rest of the windup &mdash;
+  <code>lockFacing</code> must never change, for all four templates. The first
+  draft of that test asserted something BROADER and wrong ("you can always
+  walk away") and correctly failed three of four templates, because fleeing
+  in a straight line does not beat a 4.6&nbsp;px/frame charger and was never
+  supposed to. The test was rewritten to the real invariant; the enemy code
+  did not change. One shared function, <code>Combat.resolveBox</code>,
+  resolves every hit in both directions &mdash; the player's blade and an
+  enemy's claw are the same code path, because the moment there are two
+  places that subtract from hp, neither of them is the rule.
+</div>
+
+<h2>PC platform hardening</h2>
+<div class="note">
+  <b>Pause is presenter-owned; the sim never learns it exists.</b> The
+  accumulator simply is not fed while paused &mdash; no burst of catch-up
+  steps on resume, however long the menu was open (L3 holds both ways).
+  Rebinding is live: <code>Settings.actionForCode()</code> replaced the old
+  static keymap, so a rebind takes effect on the very next keypress.
+  Settings persist to <code>localStorage</code> through exactly two lines in
+  the whole project allowed to throw on storage access, both wrapped &mdash;
+  a private tab or disabled storage degrades to "play, but don't remember,"
+  never a crash. Reduced motion thins particles to ~35% but damps camera
+  shake to 15%, not zero: shake is the vestibular-disorder trigger and gets
+  the harder cut; a near-silent kick still confirms a hit landed.
+</div>
+
+<h2>Phone touch input (D10) &mdash; chosen by a judged panel</h2>
+<div class="scroll">
+<table>
+  <tr><th>Scheme</th><th>Judge 1</th><th>Judge 2</th><th>Verdict</th></tr>
+  <tr><td>Virtual d-pad + buttons</td><td class="v">&mdash;</td><td class="v">&mdash;</td><td class="h">34&ndash;37/50 &mdash; fixed overlay sits directly over camera-framed gameplay space</td></tr>
+  <tr><td>Split fixed-zone hybrid</td><td class="v">&mdash;</td><td class="v">&mdash;</td><td class="h">34&ndash;37/50 &mdash; same real-estate defect at smaller scale</td></tr>
+  <tr><td><b>Gesture Surface</b></td><td class="v">39/50</td><td class="v">39/50</td><td class="h"><b>WINNER</b> &mdash; zero fixed chrome, heavy-attack needs no gesture recognition</td></tr>
+</table>
+</div>
+<div class="note">
+  <b>Both judges verified every citation against the live source before
+  scoring</b> &mdash; not the proposals' own claims taken on faith &mdash; and
+  caught two false integration claims in the winning proposal before
+  anything was built: that pause-menu navigation "already routes through
+  Pad" (it does not &mdash; <code>Pad.update()</code> only runs from
+  <code>Sim.step()</code>, never called while paused), and that touch
+  detection uses a boot-time <code>'ontouchstart' in window</code> snapshot
+  (a known false-positive trap, independently measured the same session: a
+  plain headless launch with ZERO touch emulation reported touch support
+  through it &mdash; the codebase already used the correct live
+  <code>matchMedia('(pointer: coarse)')</code> signal, fixed before the
+  panel's synthesis was even read).
+  <br><br>
+  <b>Five zones</b>, CSS px, computed live from the same <code>view.cssW/
+  cssH</code> every resize assertion already checks: a dead strip across the
+  top except a pause corner, a floating-stick movement half, and three
+  refcounted action bands (jump / roll / attack) on the right. No opaque
+  button art, ever &mdash; faint glyph outlines only, fading further after
+  the first several real touches. See <code>tests/out/touch-overlay.png</code>
+  for the actual rendered result: a bright held stick, a highlighted active
+  jump chevron, everything else nearly invisible, the play area still the
+  only persistently dominant thing on screen.
+</div>
+
+<h2>Measured numbers &mdash; not read from config</h2>
+<div class="scroll">
+<table>
+  <tr><th>Quantity</th><th>Value</th><th>How it was measured</th></tr>
+  <tr><td>Tick</td><td class="v">fixed 1/60</td><td class="h">asserted (L3)</td></tr>
+  <tr><td>Run speed</td><td class="v">150.0 px/s</td><td class="h">displacement over exactly 60 ticks at terminal speed</td></tr>
+  <tr><td>Acceleration</td><td class="v">5 frames each way</td><td class="h">rest &rarr; top speed &rarr; rest, counted tick by tick</td></tr>
+  <tr><td>Jump apex</td><td class="v">48.6 px &middot; 3.04 tiles</td><td class="h">min y over the arc, minus launch y</td></tr>
+  <tr><td>Rise</td><td class="v">18 frames</td><td class="h">ticks with vy &lt; 0</td></tr>
+  <tr><td>Airtime (uncut)</td><td class="v">36 frames</td><td class="h">ticks with onGround false</td></tr>
+  <tr><td>Coyote grace</td><td class="v">5 frames</td><td class="h">walk off a ledge; largest delay still giving a <i>ground</i> jump</td></tr>
+  <tr><td>Jump buffer</td><td class="v">5 frames</td><td class="h">sweep the press tick against the first tick a jump can succeed</td></tr>
+  <tr><td>Pending input hold</td><td class="v">8 frames</td><td class="h">same sweep with roll; expiry asserted at 9</td></tr>
+  <tr><td>Input latency</td><td class="v">0 frames</td><td class="h">body displaces on the same tick the key goes down</td></tr>
+  <tr><td>Roll</td><td class="v">18 frames &middot; 85.5 px</td><td class="h">between the rollStart and rollEnd ticks</td></tr>
+  <tr><td>Roll i-frames</td><td class="v">throughout</td><td class="h">rolls a spike bed for 0 damage; the walking control run bleeds</td></tr>
+  <tr><td>Roll cooldown</td><td class="v">24 frames</td><td class="h">rollStart[1].tick &minus; rollEnd[0].tick</td></tr>
+  <tr><td>Ember Dash <span class="h">(D13)</span></td><td class="v">14 frames &middot; 77 px</td><td class="h">airborne-only reuse of the roll button; between dashStart and dashEnd ticks</td></tr>
+  <tr><td>Dash cooldown</td><td class="v">30 frames</td><td class="h">dashStart[1].tick &minus; dashEnd[0].tick; refunded to a banked charge on ground contact with Extra Charge owned</td></tr>
+  <tr><td>Parry window <span class="h">(D13)</span></td><td class="v">12 frames</td><td class="h">parryStart.tick to the last tick a real hit through Combat.resolveBox still negates</td></tr>
+  <tr><td>Parry cooldown</td><td class="v">30 frames</td><td class="h">armed only after a whiff; a successful parry does not itself arm it</td></tr>
+  <tr><td>Crouch</td><td class="v">12 px &middot; 75 px/s</td><td class="h">half speed over 60 ticks; cannot stand under a 16 px ceiling</td></tr>
+  <tr><td>Terminal fall</td><td class="v">9.0 px/frame</td><td class="h">peak vy over a long drop</td></tr>
+  <tr><td>Slam</td><td class="v">4 hang &middot; 11.0 px/f &middot; 6 hitstop</td><td class="h">measured tick by tick</td></tr>
+  <tr><td>Ledge grab lockout</td><td class="v">10 frames</td><td class="h">real boundary swept, not read from config</td></tr>
+  <tr><td>Ledge grab auto-drop</td><td class="v">90 frames</td><td class="h">unattended hang measured against LEDGE_GRAB_MAX_HANG</td></tr>
+  <tr><td>Hazard</td><td class="v">1 heart &middot; 60 i-frames</td><td class="h">long spike strip so the player cannot walk clear</td></tr>
+  <tr><td>Respawn</td><td class="v">30 frames + 8 hitstop</td><td class="h">frozen and unfrozen ticks counted separately</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <b>JUMP_VEL is &minus;5.55, not &minus;5.4.</b> The continuous apex formula
+  v&sup2;/2g does not describe a 60&nbsp;Hz integrator that applies gravity on
+  the same tick as the impulse. Solving it gives &minus;5.4 and a jump that
+  measures 45.9&nbsp;px &mdash; short of the three tiles specified. The discrete
+  solution &minus;5.55 measures 48.6&nbsp;px over an 18-frame rise with a
+  symmetric 18-frame fall.
+</div>
+
+<h2>The figure</h2>
+<div class="note">
+  <b>The body skeleton lives beside the weapon poses because they have to agree
+  about where the shoulder is.</b> Both reach the screen through
+  <code>Combat.pointToWorld</code> &mdash; the transform the sim tests hitboxes
+  with &mdash; so the arm drawn on the body, the arm in a swing, and the box
+  that swing tests are one piece of geometry. Mid-swing the drawn hand <i>is</i>
+  the baked hand, asserted by object identity rather than by comparing numbers.
+  The gait is driven by distance travelled, never a timer: 60&nbsp;px per
+  two-step cycle, one footfall every 12 frames at run speed, matching the
+  <code>step</code> event. A time-driven cycle slides the feet the moment speed
+  changes.
+</div>
+<div class="note">
+  <b>Two bugs no other assertion could see.</b> Crouch dropped the hips and left
+  the legs at standing angles, floating the character 5&nbsp;px off the floor.
+  And the carried sword &mdash; 16&nbsp;px past the elbow, not 11 past the hand
+  &mdash; buried its tip in the ground at rest and reached 25&nbsp;px deep on
+  the run back-swing. Nothing else in the project looks at where the DRAWING
+  puts things, so both now have assertions: feet on the ground line in every
+  grounded stance, and the blade inside the baked swing envelope across a full
+  gait sweep of every state.
+</div>
+
+<h2>Watch companion &mdash; a static mockup, not a live view</h2>
+<div class="note">
+  <b><code>CINDER_LOOP_WATCH_MOCKUP.html</code> is a standalone file, not part
+  of <code>cinder-loop.html</code>, not built by <code>build.py</code>, no
+  gate entry.</b> Three real interpretations of "watch companion" were named
+  and put to a direct choice before anything was built &mdash; a static
+  mockup, a live view over a new local network bridge (a deliberate exception
+  to L2's zero-network stance for one optional feature), or a native Wear OS
+  app in Kotlin (a wholesale separate project, different language and
+  toolchain). <b>The static mockup was chosen.</b> The game is single-file,
+  zero-network, no server by design, and Wear OS has no standard path to
+  sideload an arbitrary HTML page &mdash; so a live version is not a small
+  feature on top of what exists, it is a data bridge that does not exist in
+  any form yet.
+  <br><br>
+  Every value on the face &mdash; hearts, the run timer's <code>04:12</code>
+  starting point, biome name, room count &mdash; is a fixed sample; there is
+  nothing to read from. The one genuinely live element is the timer's own
+  tick (real elapsed time since load), labelled as exactly that. Sized to the
+  Galaxy Watch6 Classic's actual native resolution, 480&times;480 round, not a
+  guess. Verified in real Chromium at that exact size: zero console errors,
+  correct dimensions, the timer observed actually advancing. <b>Not verified
+  on physical Wear OS hardware</b> &mdash; no device was available, and there
+  is no standard way to get this file onto one in the first place &mdash;
+  stated rather than implied to be fine, the same discipline as the
+  frame-meter caveat elsewhere on this page.
+</div>
+
+<h2>Procedural generation &mdash; D3/D3a, the fairness audit is the point</h2>
+<div class="scroll">
+<table>
+  <tr><th>Quantity</th><th>Value</th><th>How</th></tr>
+  <tr><td>Flat/descending gap ceiling</td><td class="v">3 tiles</td><td class="h">dy &le; 0; measured reliable to 4</td></tr>
+  <tr><td>Rise-1 gap ceiling</td><td class="v">3 tiles</td><td class="h">single jump; measured reliable to 4</td></tr>
+  <tr><td>Rise-2 gap ceiling</td><td class="v">2 tiles</td><td class="h">single jump near its own limit; measured reliable to 3</td></tr>
+  <tr><td>Double-jump gap ceiling (rise 3-4)</td><td class="v">4 tiles</td><td class="h">measured reliable to 6-7</td></tr>
+  <tr><td>Double-jump gap ceiling (rise 5)</td><td class="v">3 tiles</td><td class="h">tighter, near the double jump's own limit</td></tr>
+  <tr><td>Double-jump gap FLOOR (rise 3-4)</td><td class="v">1 tile</td><td class="h">below this, the rising arc drifts under the target's own footprint and hits its underside</td></tr>
+  <tr><td>Double-jump gap FLOOR (rise 5)</td><td class="v">2 tiles</td><td class="h">the rise 3-4 floor was NOT enough here &mdash; found by the physics cross-check, see below</td></tr>
+  <tr><td>Max climbable rise</td><td class="v">5 tiles</td><td class="h">GEN_MAX_RISE_TILES &mdash; nothing generated may ask for more</td></tr>
+  <tr><td>Aggregate rejection rate</td><td class="v">21.1% / 60 seeds</td><td class="h">47/60 needed zero regeneration, 13/60 needed at least one</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <b>The audit found a real bug in itself &mdash; which is the entire point of
+  building it.</b> D3a's justification is that an unfair layout "shows up as
+  'that run felt bad,'" the hardest bug class to chase. <code>verify_gen</code>'s
+  physics cross-check doesn't re-derive a second graph to grade the first
+  (L8) &mdash; it has a REAL player, through REAL sim ticks, attempt every
+  edge the audit's graph model calls legal, in an isolated two-platform world
+  built from nothing but that pair's own coordinates. It found the audit
+  silently calling a real, unreachable rise-5 double-jump climb "legal" at a
+  gap of 1 tile: the rising arc's own horizontal drift carries the body under
+  the target platform's footprint before it has climbed high enough, hitting
+  its underside like a low ceiling. A clean gap sweep at rise 3, 4, and 5
+  confirmed the true minimum precisely &mdash; gap 1 clears reliably at rise
+  3-4 but fails every time at rise 5, where gap 2 is required. Two further
+  real bugs surfaced during the same effort: <code>edgeAllowed</code>
+  originally treated climbing and dropping as symmetric (an OR across both
+  directions), letting a valid drop silently license an invalid climb the
+  other way across the same pair; and the original missing double-jump floor
+  itself, for the rise 3-4 case. Current state, all three fixed:
+  <b>174/174 real generated edges confirmed physically achievable</b> by a
+  real held jump, 6 zero-gap edges correctly out of scope.
+  <br><br>
+  <b>Wiring the generator into boot() was treated as a separate step</b> and
+  landed one session later (v0.2.6, below) &mdash; <code>50-gen.js</code>
+  landing here did not by itself change what <code>95-app.js</code> boots.
+</div>
+
+<h2>Boot plays a real generated level (v0.2.6)</h2>
+<div class="note">
+  <b><code>95-app.js</code>'s <code>boot()</code> now calls
+  <code>Gen.generate(seed)</code> as its primary path.</b>
+  <code>demoLevel()</code> is not deleted &mdash; it is the fallback
+  <code>generatedLevel()</code> reaches for if generation ever genuinely
+  fails, loudly (<code>console.warn</code> naming the real thrown error),
+  never the default. The seed is a fresh <code>Date.now()</code> per boot
+  (not <code>Math.random()</code>, which is specifically what's banned in
+  this file by the same <code>verify_arch</code> scan that covers
+  <code>80-view.js</code>), overridable via <code>?seed=12345</code> for
+  reproducing a specific run &mdash; matching the existing F2/F3/F4
+  debug-toggle conventions.
+  <br><br>
+  <b>Enemy placement, until <code>60-run.js</code> exists.</b>
+  <code>50-gen.js</code>'s own header disclaims enemy placement as out of
+  scope. A new <code>placeGeneratedEnemies()</code> lives in
+  <code>95-app.js</code> instead &mdash; explicit, temporary scaffolding
+  that walks the generated beat sequence and assigns up to one roster
+  template per chosen platform, spaced so each is met alone before any are
+  met together, the same philosophy the hand-built level always used.
+  Generated <code>pickups</code> and <code>exit</code> remain inert
+  coordinates for now &mdash; no visual, no interaction &mdash; since
+  neither a pickup system (D2) nor <code>60-run.js</code> exists yet to
+  consume them.
+  <br><br>
+  <b>Verified against the real thing, not just read as correct.</b> The gate
+  stayed GREEN 885/885 with zero suite changes needed. Beyond it, a real CDP
+  session driving the actual built file directly confirmed: two fresh loads
+  produce genuinely different levels; the same <code>?seed=</code>
+  reproduces an identical level twice in every field checked; forcing the
+  exact impossible configuration <code>verify_gen</code>'s own hard-ceiling
+  test uses (temporarily, then reverted) engages the fallback net exactly as
+  designed; and the debug co-op join lands player two grounded on the same
+  platform as player one across five different seeds.
+</div>
+
+<h2>Kilnwarden &mdash; the two-phase boss and its arena (v0.2.7)</h2>
+<div class="note">
+  <b>The masterfile's entire prior spec for <code>55-boss.js</code> was
+  "two-phase boss + arena"</b> &mdash; the same genuine open design space
+  D10 (touch input) faced, resolved the same way: a judged 3-concept design
+  panel, two independent judges checking every load-bearing claim against
+  the live source rather than the proposals' own prose. Three concepts
+  competed &mdash; a melee/charge brute, a rooted ranged zone-controller,
+  and a walk&rarr;fly hybrid. <b>Kilnwarden (the ranged, rooted concept) won
+  outright, 41/50 and 42/50</b>, because the two losers each carried a real,
+  source-verified bug: both silently relied on a template-level
+  <code>reach</code> field their own data never declared, which
+  <code>doChase</code>'s real gate reads as <code>undefined</code> &mdash;
+  for one this meant the boss would never approach a player at all; for the
+  other, phase 2's flight gate ran INVERTED and failed closed, meaning the
+  harder phase could never attack. The hybrid's plan also inserted itself
+  as a fifth row into <code>DATA.ENEMIES</code>, breaking this project's
+  own hard-pinned four-template roster test (D9) &mdash; directly
+  contradicting its own "byte-for-byte no-op" claim.
+  <br><br>
+  <b>One gap even the winning design left open was resolved before any code
+  was written.</b> Both judges flagged that Kilnwarden's own document never
+  said how its move-picker gets distance data. Verified directly:
+  <code>acquire()</code>'s <code>this.dist</code> exists but is a
+  different, vertically-weighted metric for choosing WHICH player to
+  target, wrong for gating one already-chosen attack's range against a
+  player standing on the arena's own platforms &mdash; the shipped version
+  threads the target through <code>commit()</code> instead, computing a
+  fresh horizontal distance the same way <code>doChase</code> already does.
+  <br><br>
+  <b>The engine change is additive and a provable no-op for the existing
+  roster.</b> <code>Enemy</code>'s constructor now accepts a template
+  OBJECT directly &mdash; Kilnwarden stays OUT of
+  <code>DATA.ENEMIES</code>/<code>ENEMY_IDS</code> &mdash; and an optional
+  moveset/phase mechanism reads through a fallback that resolves identically
+  to the old direct read for all four regular templates, confirmed by
+  re-running <code>verify_enemy</code> (85/85) and <code>verify_arch</code>
+  (177/177) unmodified. Two new states: a zone attack that mutates the
+  arena's own tiles into a timed hazard (read by the exact same generic
+  hazard-collision path every other hazard tile already uses &mdash; zero
+  new damage path), and a phase transition gated to fire only from the one
+  seam in the whole state machine where nothing dangerous is ever in
+  flight, so a threshold crossed mid-attack can never revise a commitment
+  already made. <b>Deliberately zero new Bus events</b> &mdash; both are
+  fully readable as plain state, the same "state IS the signal" pattern
+  already used for the existing telegraph-flash visual &mdash; an early
+  draft added two new events before this was caught and reverted, since
+  that would have reintroduced the exact undisclosed-integration-cost class
+  of gap the panel had just marked against the two losing concepts.
+  <br><br>
+  <b>A bug this project has now found twice, in nearly the same shape.</b>
+  The boss's own spawn coordinates first used the tile-KIND enum where the
+  tile-SIZE constant was needed &mdash; <code>16 * {object}</code> is
+  <code>NaN</code> &mdash; the exact mistake <code>95-app.js</code>'s own
+  boot() still carries a comment scar about from this project's worst bug
+  (v0.1.0). Caught immediately by a direct smoke test before any formal
+  suite existed.
+  <br><br>
+  <b>What was deliberately not done:</b> a boss health bar and
+  phase-transition screen cue were scoped as optional polish and are not
+  built &mdash; Kilnwarden already renders for free through the existing
+  generic enemy path. <code>60-run.js</code> does not exist, so there is
+  currently no way to reach Kilnwarden from an actual playthrough; every
+  test constructs it directly, the same way the regular roster has always
+  been tested in isolation from the boot flow.
+</div>
+
+<h2>Deeper movement and combat: wall interaction, and the second weapon (v0.2.8)</h2>
+<div class="note">
+  <b>Not a new locked decision</b> &mdash; both pieces build out scope
+  already established (the movement core generally, and D7's "content is
+  data" for weapons specifically), so no judged panel here; both landed the
+  same way <code>50-gen.js</code> did &mdash; designed, measured,
+  implemented, tested, one continuous pass.
+  <br><br>
+  <b>Wall interaction.</b> <code>onWall</code> was already computed every
+  tick (Emberrush's own charge already reads it) &mdash; this is the first
+  PLAYER mechanic to act on it. Wall slide clamps fall speed to exactly
+  2.2&nbsp;px/frame while held INTO a wall you're touching, a real, large
+  reduction from the 9.0&nbsp;px/frame terminal fall &mdash; confirmed both
+  ways: engages when pressing in, does not when merely brushing past one
+  while airborne. Wall jump reuses JUMP_VEL directly rather than a new
+  number (apex matches a normal jump's exactly), pushes away with a
+  dampened control window so continuing to hold into the wall can't
+  instantly cancel it, and outranks the double jump &mdash; proven the
+  strong way, by spending the double jump in open air first and confirming
+  a wall jump still fires with zero left. Closing the new <code>wallSlide</code>
+  state surfaced a real gap immediately: the FIGURE test's own "every state
+  has a stance" assertion caught that no pose existed for it the moment the
+  state could be entered &mdash; authored properly rather than deferred,
+  since a reachable state with no visual is a correctness gap, not the
+  boss's kind of optional polish.
+  <br><br>
+  <b>The second weapon.</b> Combat's move IDs were hardcoded directly in
+  <code>Combat.begin</code> before this. A new WEAPONS table now names just
+  two move IDs per weapon &mdash; light and heavy &mdash; matching D7's own
+  promise that a weapon owns no numbers of its own, the move it points at
+  already does. <b>Twin Daggers</b> proves the pattern is genuinely
+  reusable: a 6px blade against the default weapon's 11px, same shoulder,
+  same arm, and a real different feel (faster, three hits instead of two)
+  falls out of that plus new timing alone &mdash; baked and audited through
+  the exact same generic pipeline, zero violations.
+  <br><br>
+  <b>A real test-design bug, corrected rather than worked around.</b> The
+  first draft of the dagger-chain test used the SAME helper the blade's own
+  tests use to prove a fresh press RESTARTS a combo &mdash; its long gap
+  between presses is built to let the chain window close. Using it to prove
+  chaining WORKS produced exactly the wrong answer (never chaining at all)
+  until it was replaced with the buffered-early-press technique the blade's
+  own combo test already uses.
+  <br><br>
+  <b>A hash-coverage gap closed twice over.</b> Neither this feature's own
+  new fields nor the boss's <code>phase</code>/<code>activeMove</code>
+  (flagged by the judged panel in v0.2.7, documented at the time but not
+  actually fixed) were in the sim's determinism hash. Both closed together
+  here rather than leaving the boss's own known gap to linger.
+  <br><br>
+  <b>What was deliberately not done:</b> weapon equipping/switching has no
+  player-facing path yet &mdash; <code>player.weapon</code> is a fixed
+  default, changed only by tests directly, waiting on the not-yet-built
+  pickup system (D2). No colour/scaling fields were added to WEAPONS ahead
+  of a real consumer for them either: a field nothing reads is worse than
+  no field at all.
+</div>
+
+<h2>The stat contract, real pickups, and weapon scaling (v0.2.9)</h2>
+<div class="note">
+  <b>Also not a new locked decision.</b> D2 was specified in full at this
+  project's very start &mdash; three colours, a pickup grants +1 to a
+  chosen stat and +HP only if that stat is dominant, a weapon scales off
+  the larger of its two named colours. This session is the first that
+  actually builds it, the same designed&rarr;measured&rarr;implemented&rarr;
+  tested shape as v0.2.8, no judged panel needed.
+  <br><br>
+  <b>Read precisely rather than assumed.</b> "+HP" reuses D8's own
+  vocabulary &mdash; meta currency already buys "+max HP" permanently, so
+  the within-run version reads as the same concept. "Dominant" is read as
+  STRICTLY the sole highest stat: catching up to exactly tie the leader
+  grants no HP, only overtaking it does, proven directly rather than left
+  to guesswork. The very first pickup of any run is unconditionally
+  dominant (1,1,1&nbsp;&rarr;&nbsp;2,1,1 has nothing to tie against), which
+  is correct, not a loophole &mdash; the anti-death-spiral property only
+  has work to do once stats have actually diverged.
+  <br><br>
+  <b>One real, named simplification.</b> "Dual choices weighted toward the
+  two lowest stats" implies choosing between two spatial options;
+  <code>50-gen.js</code>'s pickups are single points, and reshaping an
+  already-shipped, fairness-audited generator was real scope not taken on
+  here. The weighting is applied instead at the moment of collection
+  (<code>pickStatColour</code>, <code>30-player.js</code>): the current
+  sole leader is weighted down, never excluded &mdash; confirmed over 3000
+  real seeded draws that it still gets picked sometimes, just measurably
+  less than either trailing stat, and that a genuine three-way tie stays
+  roughly uniform.
+  <br><br>
+  <b>Weapon scaling, wired for real.</b> <code>WEAPONS</code>
+  (<code>10-data.js</code>) already named two colours per weapon since
+  v0.2.8; a new <code>Combat.weaponScale</code> now reads the LARGER of
+  the two &mdash; never their sum, never an unrelated third colour, both
+  proven directly &mdash; and multiplies the move's own baked damage by
+  <code>1&nbsp;+&nbsp;(statValue&nbsp;&minus;&nbsp;1)&nbsp;&times;&nbsp;STAT_SCALE_PER_POINT</code>,
+  rounded once, at the point of application, so every damage number this
+  game shows stays a clean integer. <code>STAT_SCALE_PER_POINT</code>
+  (0.15) is named in its own comment as a design judgment, not a
+  measurement &mdash; the same discipline as <code>GEN_MIN_FIGHT_TILES</code>.
+  A weapon with no registered colours falls back to the highest of all
+  three stats, the fallback D2 names explicitly, proven with an
+  unregistered weapon id.
+  <br><br>
+  <b>A real bug, caught by writing the right assertion, not by luck.</b>
+  The first draft of the pickup-collision tests never actually drove the
+  player into the pickup &mdash; it sat edge-touching the spawn box
+  (<code>aabb()</code> needs real overlap, not touching edges), so nothing
+  was ever collected. Two of the three pickup tests passed anyway, for the
+  wrong reason: "collecting an already-collected pickup grants nothing
+  more" and "it becomes uncollected after a reset" are both trivially true
+  if nothing was ever collected in the first place &mdash; the same
+  "a check quietly becomes a no-op" failure <code>35-rig.js</code>'s own
+  audit exists to guard against, just found in the harness this time.
+  Fixed by driving real movement into the pickup and adding an explicit
+  "collection actually happened" assertion before each negative claim.
+  <br><br>
+  <b>What was deliberately not done:</b> no spatial dual-choice UI &mdash;
+  see the simplification above. Weapon equipping/switching still has no
+  player-facing path (D4, not D2). <code>65-meta.js</code>'s permanent,
+  cross-run progression is untouched; D2's stats are explicitly WITHIN one
+  run, reset by <code>resetTransient()</code>, an interim reading of "a
+  run boundary" until <code>60-run.js</code> defines one more precisely.
+  The HUD's own heart-meter rendering still hardcodes
+  <code>CFG.MAX_HP</code> for its draw loop &mdash; sim-level growth is
+  real and tested, the visual is deferred, the same shape as the boss's
+  own health-bar deferral.
+</div>
+
+<h2>Warmaul and Thornspear &mdash; D9's roster is complete (v0.2.10)</h2>
+<div class="note">
+  <b>Genuine open design space, unlike the last two versions.</b> D9 locked
+  the roster at four weapons from this project's very start; only
+  <code>blade</code> and <code>daggers</code> existed going in. D9 names a
+  COUNT, never identities, so this got the same process the boss and touch
+  input used &mdash; a judged panel, every pitch and every judge reading the
+  live source directly &mdash; rather than the "already fully specified,
+  just build it" shape v0.2.8/v0.2.9 both were.
+  <br><br>
+  <b>The panel split &mdash; a first here.</b> Every prior panel in this
+  project won outright, both judges agreeing. This time judge 1 scored the
+  three pitches 42/39/36 and judge 2 scored the SAME three 37/42/46 &mdash;
+  different winners. Deciding meant reading both judges' full critiques, not
+  summing scores: the runner-up's weaker weapon duplicated Blade's exact
+  reach AND exact chain length &mdash; the harshest individual-weapon
+  criticism either judge made of any of the six weapons proposed, closer to
+  "a bigger Blade" than a new combat verb. <b>Warmaul</b> (umbral/verdant,
+  18px reach, one committed hit, <code>chain: null</code>, no combo at all)
+  and <b>Thornspear</b> (ember/verdant, 20px reach, a four-hit chain, the
+  roster's weakest heavy) won: zero false claims from either judge, and the
+  only pitch to extend a real discovered invariant &mdash; Blade's and
+  Daggers' light chains already total the same 13 base damage &mdash;
+  cleanly to both new weapons. Both weapons reuse the OTHER slot's
+  conventional hitstop constant on purpose: Warmaul's light hit freezes
+  like a heavy, Thornspear's heavy stays quick like a light.
+  <br><br>
+  <b>The runner-up's own concern turned out to be real.</b> A judge's one
+  criticism of the winning pitch &mdash; Thornspear's pitched 22px blade
+  being "nearly quadruple" the character's own default reach &mdash; wasn't
+  waved off. Baked into the real merged move table (the exact construction
+  <code>C.RIG = new Rig(MOVES)</code> performs at boot) it measured the
+  whole game's reach envelope at 40.5px against <code>verify_rig</code>'s
+  own pre-existing "about two tiles, not ten" ceiling (20&ndash;40px), an
+  invariant that predates this weapon by several versions and was not
+  loosened to fit it. Pulled back to 20px before anything shipped;
+  re-measured at 38.65px, real headroom, still the longest reach in the
+  roster.
+  <br><br>
+  <b>A second real bug, geometric this time, caught the same way Twin
+  Daggers' was.</b> Hand-authoring frames for a longer blade isn't the same
+  problem as for a shorter one: <code>heavy</code>'s own windup can swing
+  back to -143&deg; and stay under <code>RIG_ACTIVE_SPEED</code> only
+  because its blade is 11px &mdash; short enough that even a big angle
+  change moves the tip slowly. The same angles copied onto Warmaul's 18px
+  and Thornspear's 20&ndash;22px levers were ALREADY moving fast while the
+  blade was still behind the body &mdash; a real <code>behind</code> audit
+  violation on both moves' first draft, caught by baking against the actual
+  <code>Rig.bakeMove()</code>/<code>audit()</code> functions before either
+  was ever written into the shipped table. Fixed with a shallower,
+  deliberately-held windup (small steps until just clear of the body, then
+  one large release frame), not by weakening the rule.
+  <br><br>
+  <b>A second, adversarial pass over this section's own work found three
+  more real bugs before it was called done.</b> Fifteen independent agents
+  (five dimensions, each re-checked by a second independent verifier)
+  re-read the finished code and docs against live source rather than
+  trusting the first pass. <b>One:</b> "the roster's single biggest hit
+  (13)" described <code>maulA</code> &mdash; Warmaul's LIGHT move &mdash;
+  when its own HEAVY move (<code>maulHeavy</code>, 20) and even the
+  pre-existing default <code>heavy</code> (14) both hit harder; copied
+  verbatim from a wrong test comment into three separate docs before being
+  caught. <b>Two:</b> <code>bash tests/run_all.sh</code>, re-run six times
+  in a row rather than once, came back GREEN only once &mdash; the other
+  five failed inside <code>verify_render</code> on two assertions timed
+  with a fixed sleep instead of a poll for the real condition. Pre-existing
+  and unrelated to this feature's own content, but real, and this page had
+  already written "GREEN 1120/1120" off one passing run before it was
+  found &mdash; fixed for real (both sleeps replaced with a poll), not
+  caveated around. <b>Three:</b> the "never a chain" test for Warmaul
+  cannot actually reach <code>Combat.begin</code>'s mid-move branch &mdash;
+  confirmed by mutating the real <code>maulA.chain</code> field and
+  watching the test stay green regardless; a second test, added alongside
+  it, buffers a press while <code>maulA</code> is still active and the same
+  mutation now catches it. All three fixed for real, not documented as a
+  known gap; the numbers throughout this page already reflect the fixes.
+  <br><br>
+  <b>What was deliberately not done here:</b> weapon equipping/switching
+  still has no player-facing path &mdash; two more rows in
+  <code>WEAPONS</code> don't change that D4's pickup/blueprint delivery
+  system is a separate, still-unbuilt piece. D9's roster being complete and
+  D4 existing are two different claims; only the first is true as of this
+  version.
+</div>
+
+<h2>Slam impact &mdash; the ground-pound finally hits something (v0.2.11)</h2>
+<div class="note">
+  <b>No judged panel this time &mdash; and that itself was a real decision.</b>
+  The slam has always had landing FX (6 frames of hitstop, a screen shake,
+  particles) but never dealt damage: a false affordance, since it visibly
+  LOOKS like an attack and wasn't one. Unlike Warmaul/Thornspear, D9 named
+  an open weapon COUNT but slam-as-attack has only one real fork
+  (universal vs. per-weapon), and D7's own "a weapon owns no numbers of its
+  own" already argues against per-weapon for a movement-triggered shockwave
+  that was never a swing. Everything else was already a written rule before
+  this session started &mdash; route through <code>Combat.resolveBox</code>,
+  never a second hp-subtraction path &mdash; so this landed designed,
+  measured, implemented, tested, one pass, the same shape wall interaction
+  used to skip a panel too.
+  <br><br>
+  <b>The numbers:</b> 10 base damage (matches daggerHeavy's tier), 22px
+  reach each side of the body, a 14px ground-level AOE band, mostly
+  horizontal knockback &mdash; still scaled by <code>Combat.weaponScale</code>
+  off current stats, so D2 stays coupled to every damage source. A
+  connecting slam requests <code>CFG.HITSTOP_HEAVY</code> instead of the
+  unconditional landing 6, the same "biggest hits get the biggest freeze"
+  rule every weapon's own heavy follows.
+  <br><br>
+  <b>The architecture question, decided by re-reading existing rules.</b> A
+  slam has no facing &mdash; it's a shockwave centred on the landing point
+  &mdash; but <code>resolveBox</code> always pushes every target in ONE
+  shared direction. Teaching it a second knockback model would be exactly
+  the "two places that subtract from hp" failure this project's own rule
+  warns against. The fix: two <code>resolveBox</code> calls, a LEFT box and
+  a RIGHT box flanking the body, sharing one dedupe list &mdash; the ONE
+  shared resolver still resolves every hit, just called twice.
+  <br><br>
+  <b>Four real problems, caught before this ever reached the gate.</b>
+  <b>One:</b> the first draft used <code>Object.assign</code> &mdash; this
+  codebase makes NO ES2015+ runtime assumptions anywhere, stated explicitly
+  in <code>92-menu.js</code>'s own <code>withField</code> comment, because a
+  Wear OS WebView is a real target. Fixed to two full literal objects.
+  <b>Two:</b> a stale comment on <code>player.weapon</code> still blamed the
+  missing equip path on "the not-yet-built pickup system (D2)" &mdash; D2
+  shipped two versions ago; the real dependency is D4, corrected in
+  passing. <b>Three:</b> the knockback test read target position
+  immediately after landing and found it unchanged &mdash; not a broken
+  mechanic: knock is applied as VELOCITY, and a connecting slam's own
+  hitstop request freezes the ENTIRE sim, targets included, for 9 ticks
+  starting that same tick. Traced tick-by-tick with a real script; fixed by
+  stepping past the freeze before checking. <b>Four:</b> chasing #3 meant
+  re-running the full gate repeatedly, which surfaced <code>verify_render</code>
+  failing on two MORE timing assertions beyond the two v0.2.10's own
+  adversarial pass had already found &mdash; a keystroke-displacement check
+  and a jump-height check, the third and fourth instance of the exact same
+  bug class. Rather than wait for a fifth unlucky re-run, the rest of the
+  file was grep'd for the same shape on purpose &mdash; a touch-drag
+  displacement check, not yet observed to fail, fixed anyway.
+  <br><br>
+  <b>A SECOND adversarial pass, over this section's own already-finished
+  work, found four more real problems.</b> A mislabeled byte count in the
+  changelog, traced to <code>build.py</code> itself printing a Python
+  character count as if it were bytes &mdash; fixed at the root, not just
+  patched in a doc. This masterfile's own "five fixed timing assertions"
+  claim, when the very next parenthetical names seven &mdash; fixed.
+  <code>SLAM_HIT_H</code> (the AOE's vertical reach) had ZERO real test
+  coverage: every dummy in the section rests on the floor, where its own
+  height already spans nearly any plausible value, confirmed by sweeping
+  the real number from 1 to 1000 with no change in outcome &mdash; closed
+  with two tests that pin a target's height for a whole landing, since
+  dummies fall under real gravity same as the player. And the real cause
+  of this project's OWN gate instability, which turned out not to be sim
+  timing at all: Chrome is a process TREE, and Windows'
+  <code>proc.kill()</code> does not cascade to the GPU/renderer children it
+  spawns &mdash; every real run left orphans behind (37 observed
+  accumulated in one sitting) until a fresh launch failed outright with
+  zero output, indistinguishable at first from more timing flakiness.
+  Fixed with a real tree-kill; orphan growth confirmed stopped by direct
+  measurement. A rarer, still-undiagnosed failure survives under
+  artificially rapid re-runs &mdash; named honestly, not claimed gone.
+  <br><br>
+  <b>What was deliberately not done here:</b> no per-weapon slam variant (a
+  named scope choice). No resource cost or cooldown beyond the existing
+  hang/landing recovery &mdash; whether a free, always-available AOE needs
+  one is a balance question this session did not attempt to answer.
+</div>
+
+<h2>Ledge grab / mantle &mdash; real spatial reasoning, not a velocity clamp (v0.2.12)</h2>
+<div class="note">
+  <b>No judged panel &mdash; the same reasoning that skipped one for wall
+  interaction and slam impact.</b> Catch a wall's own top edge while
+  falling into it, climb with jump, drop with down: genre-standard shape,
+  not open creative space. What made THIS feature different from either
+  precedent: wall slide/jump are velocity clamps that need no
+  world-knowledge beyond "touching a wall right now," but a ledge grab is
+  a real claim about the tilemap &mdash; the wall has to actually run out,
+  within reach, into a surface the player can stand on.
+  <code>detectLedge()</code> was written as its own function and proven
+  against three constructed test worlds (a clean ledge, a wall that never
+  ends within reach, a ledge with no headroom to climb into) before it was
+  ever wired into <code>update()</code> &mdash; the same
+  bake-before-ship discipline every rig move already follows, applied to
+  collision geometry instead of a pose.
+  <br><br>
+  <b>The numbers:</b> grab condition is airborne, touching a wall, holding
+  INTO it, vy &ge; 0, not locked out &mdash; checked BEFORE wall slide's
+  own clamp, since a genuine ledge takes priority over merely sliding past
+  the same wall. Climb input is jump (genre-standard, not a new "up" input
+  this project doesn't otherwise use anywhere). Release is down, or a
+  90-frame (<code>LEDGE_GRAB_MAX_HANG</code>) timeout. Re-grab lockout is
+  10 frames (<code>LEDGE_GRAB_LOCKOUT</code>), stopping the ledge just
+  climbed off from instantly re-catching on the way up. While hanging,
+  velocity is pinned to zero every tick &mdash; the wall IS the support,
+  the same way a ground tile is.
+  <br><br>
+  <b>Three real bugs, caught by hand before any test ever ran.</b>
+  <b>One:</b> the first climb draft nudged the body a fixed 6px off the
+  wall face rather than anchoring to the tile grid &mdash; traced by hand
+  that this left the body straddling two tile columns instead of standing
+  fully on the ledge. Fixed by anchoring directly to the tile boundary
+  <code>detectLedge()</code> had already proven has headroom.
+  <b>Two:</b> immediately after climbing, state read <code>fall</code> and
+  onGround read false for exactly one tick despite the body already
+  sitting correctly &mdash; the same class of bug already fixed once for
+  roll's own start frame: <code>move()</code>'s Y-step never runs at all
+  when vy is exactly 0. Fixed the same way,
+  <code>b.vy += CFG.GRAVITY</code> on the transition tick.
+  <b>Three:</b> <code>finish()</code>'s own state classifier would have
+  silently overwritten <code>state = 'ledgeGrab'</code> back to
+  <code>'wallSlide'</code> the same tick it was set, since its exclusion
+  list didn't yet know the state existed &mdash; caught by re-reading
+  <code>finish()</code> before ever running a test.
+  <br><br>
+  <b>A dedicated adversarial pass, run the same way as every feature this
+  session, stayed five-for-five &mdash; four more real problems, three
+  substantive.</b> <b>One:</b> a crouched approach that then climbs never
+  stood the body up: <code>b.h</code> stayed at the crouched 12px while
+  <code>b.y</code> was computed for the standing 22px ledge position,
+  leaving the feet ~10px above the real surface, self-healing only
+  several ticks later once the ordinary in-air auto-uncrouch caught up.
+  Fixed by standing the body up unconditionally on the climb transition;
+  unlike the ground jump's own crouch-cancel (which asks permission via a
+  real <code>canStand()</code> check), <code>detectLedge()</code> had
+  already proven the clearance at the specific landing spot. <b>Two:</b> a
+  hazard hit couldn't knock a hanging player free &mdash; the
+  <code>ledgeGrab</code> block's own per-tick "pin velocity to zero" ran
+  again the very next tick, before <code>move()</code> ever applied the
+  hurt knockback. Fixed in <code>Player.prototype.hurt()</code>: a hit now
+  releases the hang immediately, the same way every other interruption in
+  this game already takes priority over holding still. <b>Three:</b> the
+  "touching but not holding in never grabs" test never actually touched
+  the wall &mdash; it proved a body released the wrong way for the right
+  side effect. Rewritten to genuinely touch the wall first, then release,
+  before asserting no grab follows. <b>Four:</b>
+  <code>STANCE.ledgeGrab</code>'s own comment in <code>35-rig.js</code>
+  claimed the existing 1500-tick figure-drive sweep validated the pose
+  &mdash; it structurally cannot, since that sweep runs against
+  flatWorld, which has no wall that ever ends into a ledge. Comment
+  corrected; a dedicated test added that drives a real ledgeGrab on a real
+  constructed world and poses it directly.
+  <br><br>
+  <b>A fourth recurrence of this project's own documented "worst bug"
+  &mdash; caught in scratch work, not shipped code.</b> The standalone
+  probe script written to hand-verify <code>detectLedge()</code> before
+  wiring it in used <code>TILE</code> (the tile-<i>kind</i> enum) in a
+  pixel arithmetic expression where <code>CFG.TILE</code> (16, the tile
+  <i>size</i>) was needed, producing NaN. Caught immediately by the
+  probe's own nonsensical null results, not assumed correct. Never
+  touched anything shipped.
+  <br><br>
+  <b>What was deliberately not done here:</b> no ledge-to-ledge chaining
+  or wall-to-wall climbing beyond one catch-climb-or-drop cycle &mdash;
+  genre convention for this move is exactly that cycle. The re-grab
+  lockout test's own precision is coupled to its test geometry, named
+  honestly in the test's own comment rather than left implicit.
+</div>
+
+<h2>The run loop &mdash; spawn &rarr; clear &rarr; boss &rarr; die &rarr; spend &rarr; respawn (v0.2.13, D1)</h2>
+<div class="note">
+  D1, this project's very first locked decision, named the complete run
+  loop as the day-one target. Every other system had been real and
+  gate-verified in isolation while staying reachable only by direct
+  construction in a test, never from an actual played game &mdash; this
+  closes that gap. <code>boot()</code> now calls a real
+  <code>sim.beginRun()</code>; a level generates, a roster places, clearing
+  it and reaching the exit opens the boss door, and a boss kill or a death
+  anywhere along the way pays out D8's currency stub and rolls a genuinely
+  new level.
+  <br><br>
+  <b>Genuinely open design space, unlike wall interaction/slam impact/ledge
+  grab, which all skipped a judged panel because an existing rule already
+  dictated their shape.</b> A judged 3-pitch panel, two independent judges,
+  found a real bug in every pitch &mdash; a "independent" RNG stream seeded
+  from the exact value Sim's own stream already uses, a central transition
+  promised in prose but never actually written, and a boss-victory countdown
+  nested inside a guard the transition itself flips false the instant the
+  countdown starts, permanently freezing the game after any boss victory not
+  preceded by a death. None shipped as pitched. "Clear," precisely: every
+  enemy this level placed has hp &lt;= 0, AND a living player has reached the
+  exit &mdash; unanimous across all three pitches and both judges. Zero new
+  Bus events, also unanimous: every transition reads state Sim already owns
+  for other reasons, or reuses an event that already fires at the right
+  moment.
+  <br><br>
+  <b>A real bug, found and fixed before this version was called done.</b>
+  <code>beginRun()</code> is a genuine restart, callable more than once on
+  the same Sim &mdash; but the first draft only cleared run-level bookkeeping,
+  never the players. A player still mid-death-countdown from a prior,
+  abandoned run kept counting down against a <code>_wasDead[]</code> just
+  told, falsely, that nobody was dead &mdash; the next tick misread the same
+  old death as a brand-new one and opened a bogus second run-end sequence,
+  which later silently committed a stale level swap nobody asked for. Fixed
+  by having <code>beginRun()</code> genuinely revive every player first.
+  <br><br>
+  <b>A dedicated adversarial-verification pass, run the same way as every
+  feature this session, stayed six-for-six.</b> Five independent lenses,
+  each required to construct and actually RUN a real reproduction before
+  reporting anything. Six real problems, fixed: <b>(1)</b> co-op kills
+  landed during the death-pending window were silently discarded, never
+  paid &mdash; currency now banks at the commit tick, the latest possible
+  moment, instead of the trigger tick, the earliest. <b>(2)</b> a run
+  boundary only ever reset the ONE player who died &mdash; every alive
+  player now resets to the D2 baseline at commit, not just an incidental
+  side effect of one player's own respawn. <b>(3)</b> <code>nextRunSeed</code>'s
+  bare XOR-multiply mixing produced a real, structural seed collision
+  &mdash; runs 300 and 304 were byte-identical levels for every starting
+  seed tried; fixed with a proper 32-bit avalanche mix. <b>(4)</b> killing
+  the boot-path practice Dummy banked real run currency &mdash; fixed with
+  the same roster-id guard <code>isLevelClear()</code> already trusted.
+  <b>(5)</b> <code>Gen.generate()</code> failures were only ever guarded at
+  boot &mdash; every later level transition had zero net, freezing the game
+  solid on a failure and re-throwing forever; fixed by sharing the boot-time
+  fallback logic with the main frame loop. <b>(6)</b> a comment overclaimed
+  the boot-path Dummy as "permanently alive" &mdash; it is wiped by the very
+  first level transition; comment corrected. One more finding &mdash; a
+  pickup spur close enough to the exit to satisfy <code>RUN_EXIT_RADIUS</code>
+  without touching the exit platform &mdash; was investigated and correctly
+  read as an accepted consequence of that constant's own already-documented
+  "generous, not pixel-perfect" design, not a bug; documented rather than
+  changed.
+  <br><br>
+  <b>Verified against real sim ticks, including a real mutation check, not
+  read as correct.</b> <code>verify_run</code> grew from 101 to 118
+  assertions. The stat-reset fix was additionally mutation-tested: the new
+  reset loop was disabled in a scratch copy, the three new assertions
+  failed exactly as expected, and the real fix was restored and reconfirmed
+  green &mdash; proof the tests catch the bug's absence, not just that they
+  pass. <code>bash tests/run_all.sh</code> &rarr; <b>GREEN 1305/1305 across
+  13 suites.</b>
+  <br><br>
+  <b>What was deliberately not done here:</b> <code>65-meta.js</code> still
+  does not exist &mdash; D8's currency stub pays out and spends but has
+  nowhere permanent to go. Weapon equipping/switching still has no
+  player-facing path (D4). No dedicated sim-level regression exists for the
+  <code>Gen.generate()</code> mid-run crash fix &mdash; it lives in the
+  presenter, which <code>verify_run.js</code> does not exercise; named as a
+  gap rather than assumed covered.
+</div>
+
+<h2>Meta progression &mdash; persistence, blueprints, +max HP (v0.2.14, D4/D8)</h2>
+<div class="note">
+  D8 named four purchases: "flask charges, +max HP, backpack slot,
+  starting-loadout choice." D4 named the blueprint loop: "drop, carry, lose
+  on death, hand in at a transition, pay to unlock into the pool. Stage 1
+  ships with the pool pre-unlocked, plus a debug-room toggle to enforce
+  it." Both locked from the start; this is the first session that builds
+  any of it.
+  <br><br>
+  <b>Scope, decided explicitly &mdash; the user chose from three options.</b>
+  The middle ground won: D4's blueprint loop plus D8's +max HP purchase,
+  not all four purchases and not zero. Flask charges (a consumable/heal
+  mechanic) and a backpack slot (a capacity concept) are genuinely NEW game
+  design with zero existing engine surface &mdash; unlike +max HP (reuses
+  D2's own "+HP" vocabulary directly) or blueprint unlocks (target the four
+  already-built, D9-locked weapons). Named and deliberately deferred, the
+  same two-step discipline D11/D12 already used.
+  <br><br>
+  <b>No judged panel &mdash; the one real design decision was reading D4
+  precisely.</b> "Lose on death" and "hand in at a transition" are the
+  run's own TWO endings (D1 names death as one of exactly two ways a run
+  ends), not sequential steps of one outcome. A player whose own death
+  ends the run never reaches a transition alive &mdash; they always lose
+  their carry, never hand it in. Only a SURVIVING player (a boss victory
+  with no death, or a living co-op partner) ever hands one in.
+  <br><br>
+  <b>A real bug in this session's OWN test suite, caught by actually
+  running it.</b> The first draft of <code>verify_meta.js</code> assumed a
+  player who dies AND whose death triggers the run-end would ALSO hand in
+  their carried blueprint at that commit. Running it failed three ways
+  &mdash; not unlocked, currency not spent, no event fired. Tracing why
+  found the CODE was already correct: the dying player's own natural
+  respawn clears <code>carriedBlueprint</code> before
+  <code>_commitPendingLevel()</code> ever runs, the same tick, exactly D4's
+  "lose on death." Rewritten around a boss-victory transition instead, plus
+  a co-op scenario proving both outcomes at once &mdash; one player dies
+  and loses theirs, the survivor hands in and unlocks theirs.
+  <br><br>
+  <b>Currency: two numbers on purpose.</b> <code>run.currency</code>
+  (within-session, reset by <code>beginRun()</code>) and
+  <code>meta.currency</code> (permanent, survives a restart AND a reload)
+  both grow by the same earned amount at every commit &mdash; "total earned
+  this session" and "current spendable wallet," not a bug.
+  <code>RUN_SPEND_STUB_COST</code>, the run loop's own placeholder, is
+  retired now that a real price exists.
+  <br><br>
+  <b>A dedicated adversarial pass, run the same way as every feature this
+  session, stayed seven-for-seven.</b> Five independent lenses found four
+  real problems, two of them the SAME bug found independently by two
+  lenses: <b>(1)</b> F5/F6 &mdash; the ONLY exposed way to spend meta
+  currency or flip the lock toggle &mdash; never persisted their own
+  result; <code>saveMeta()</code> only fired on the next <code>runEnd</code>,
+  so a real purchase silently reverted on an ordinary reload if the player
+  closed the tab first. Fixed by saving immediately after each debug key's
+  own mutation. <b>(2)</b> <code>runEnd.handedIn</code> silently dropped a
+  consumed blueprint whose weapon was already unlocked by an earlier
+  carrier in the same commit loop &mdash; the spend/unlock logic itself
+  was correct, only the event payload under-reported it. <b>(3)</b>
+  <code>opts.meta</code>/<code>applyMeta()</code> adopted a live reference,
+  not a copy &mdash; two Sims built from the same object silently shared
+  it. Fixed by routing both through <code>MetaLogic.sanitize()</code>,
+  which already builds a fresh, validated copy. <b>(4)</b>
+  <code>applyMeta()</code>'s own comment named a call site that does not
+  exist &mdash; corrected, and the method got real test coverage for the
+  first time. A fifth issue, self-found while fixing the above:
+  <code>verify_meta.js</code>'s own header overclaimed browser coverage
+  that did not exist yet &mdash; fixed by adding it, not just correcting
+  the claim.
+  <br><br>
+  <b>Verified against real sim ticks and a real browser, including real
+  mutation checks.</b> <code>verify_meta</code> grew from 176 to 191;
+  <code>verify_render</code> grew from 98 to 113, a new "meta persistence"
+  section driven through real F5/F6 key dispatch. <code>cdp.js</code>
+  gained F5/F6 key-code mappings to make the dispatch possible at all.
+  <code>bash tests/run_all.sh</code> &rarr; <b>GREEN 1520/1520 across 14
+  suites.</b>
+  <br><br>
+  <b>What was deliberately not done here:</b> flask charges and a backpack
+  slot (named above). No shop/hub UI &mdash;
+  <code>buyMaxHp()</code>/<code>toggleEnforceLocks()</code> are real, tested
+  Sim methods reachable today only via debug keys (F5/F6). A blueprint
+  dropped is an instant grant on kill, not a spatial pickup entity to walk
+  over &mdash; a real, named simplification. Starting-loadout choice has no
+  consumer yet: weapon equipping/switching still has no player-facing path
+  at all, so an unlocked weapon has no way to become what a run starts
+  with.
+</div>
+
+<h2>Narrative &mdash; the Kilnkeeper, dialogue trigger + text-box render (v0.2.15, D11/D12)</h2>
+<div class="note">
+  D11 (2026-08-15): a <code>DIALOGUE</code> table, fired through the
+  existing typed Bus, rendered entirely presenter-side. Two pools: a
+  recurring narrator voice (the Kilnkeeper) at run milestones, and short
+  per-template enemy barks, both line-picked via a seeded RNG this file
+  owns itself. D12, the same day: the villain reveal &mdash; the
+  Kilnkeeper IS Kilnwarden's own voice, and every line heard earlier
+  rereads once it lands. Both locked before this session; no judged panel
+  needed &mdash; the real work was reading D11 precisely, not inventing a
+  shape for it.
+  <br><br>
+  <b>Zero new Bus events, zero changes to any SIM file.</b> Milestones are
+  detected by polling <code>sim.run.phase</code>/<code>levelSeed</code>/
+  <code>runsCompleted</code> and each player's own <code>state</code> once
+  per rendered frame &mdash; the identical "remember, compare, act on the
+  edge" technique <code>_stepRun()</code> already uses, applied from the
+  presenter side, reading only, writing nothing. The one Bus subscription
+  needed (<code>telegraph</code>) already existed. A death always wins
+  over a same-tick boss-victory reading, the identical priority
+  <code>_stepRun()</code> itself already commits to. The reveal is
+  deliberately SESSION-scoped, not persisted &mdash; a real, named
+  simplification.
+  <br><br>
+  <b>The writing, not just the wiring.</b> The Kilnkeeper's lines are
+  double-voiced on purpose: a warm, faintly odd guide on a first read
+  ("the kiln has never once run cold"); the same lines describe exactly
+  what it has been doing to the player once the reveal lands ("The kiln
+  was never behind me. I am the kiln."). D12's own "every line heard
+  earlier rereads" is a writing constraint, treated as one, not something
+  requiring extra code.
+  <br><br>
+  <b>A dedicated adversarial pass found six real problems, two of them
+  live.</b> <b>(1)</b> A boss-phase death, staged across the real
+  multi-frame sequence Sim actually uses (not within one update() call),
+  could show a triumphant bossVictory line &mdash; by the commit frame the
+  player's own state has already cycled back to alive, making a death and
+  a real victory field-for-field identical. Fixed with a
+  <code>_deathDuringBoss</code> flag. <b>(2)</b> The dialogue RNG was never
+  given a real seed in production &mdash; every boot, ever, silently fell
+  back to the class's own hardcoded default, making every player hear the
+  exact same lines forever. Fixed by threading <code>boot()</code>'s own
+  real seed through. Three more were real but not reachable through
+  today's wiring, fixed defensively anyway: a reveal blind spot if
+  constructed already mid-boss, unclamped panel geometry, and a
+  <code>subscribe()</code> with no idempotency guard. One more was
+  investigated and correctly read as an already-accepted consequence of
+  the existing <code>Gen.generate()</code> fallback design, not a new bug
+  &mdash; named rather than silently absorbed.
+  <br><br>
+  <b>Verified against real sim ticks and a real browser, including a real
+  mutation check.</b> <code>verify_narrative</code> grew from 54 to 65;
+  <code>verify_render</code> grew from 117 to 118 (
+  <code>narrative.rng</code> proven seeded from the real boot seed, checked
+  against the pristine instance). The boss-phase-death fix was
+  mutation-tested: disabled in a scratch copy, the new assertion failed as
+  expected, the real fix restored and reconfirmed green.
+  <code>bash tests/run_all.sh</code> &rarr; <b>GREEN 1596/1596 across 15
+  suites.</b>
+  <br><br>
+  <b>What was deliberately not done here:</b> <code>85-audio.js</code>
+  still does not exist. No dialogue queue &mdash; a second trigger
+  REPLACES the current line rather than waiting its turn. Barks fire off
+  every telegraph including the boss's own &mdash; Kilnwarden has no
+  dedicated bark pool, so its own telegraph fires nothing rather than
+  throwing.
+</div>
+
+<h2>Synthesized SFX &mdash; Web Audio engine, real mute toggle (v0.2.16, D11)</h2>
+<div class="note">
+  D11 already scoped this file precisely: "hang off the same trigger
+  design" narrative established, rather than invent a second one &mdash;
+  no judged panel needed, the same "design already specified, only
+  implementation questions remained" shape D2/wall interaction/slam
+  impact/narrative each used. This session chose the one real fork D11
+  left open: SFX only, no music/ambience.
+  <br><br>
+  <b>Two Web Audio primitives, matched to what fifteen real cues actually
+  need.</b> <code>tone</code> &mdash; oscillator + gain-envelope notes,
+  optionally pitch-swept &mdash; and <code>noise</code> &mdash; a
+  filtered buffer, for a whoosh a pitched oscillator can't produce. The
+  <code>Math.random</code> ban applies to presenter code too
+  (<code>verify_arch</code>'s own source scan); <code>SFXPlayer</code>
+  owns its own local seeded RNG, never <code>sim.rng</code>. The
+  <code>AudioContext</code> is lazily constructed &mdash; never at boot,
+  only on first real use &mdash; solving the browser autoplay-gesture
+  policy and Node testability with one design choice. The mute toggle is
+  real Settings/Menu UI, not a debug key like v0.2.14's own F5/F6.
+  <br><br>
+  <b>Caught before the adversarial pass even started, by this session's
+  own new browser coverage.</b> <code>boot()</code>'s menu
+  <code>onChange</code> reassigned its own closure-local
+  <code>settings</code> on every change but never wrote it back onto
+  <code>app.settings</code> &mdash; stale for anyone reading it from
+  outside <code>boot()</code>. Fixed with one line.
+  <br><br>
+  <b>A dedicated adversarial pass found fourteen candidates, thirteen
+  confirmed, six real code defects.</b> <b>(1)</b> The most severe:
+  <code>play()</code>/<code>unlock()</code> had zero try/catch around
+  real <code>AudioContext</code> node creation &mdash; a degraded context
+  throwing escaped uncaught into <code>95-app.js</code>'s own
+  <code>sim.step()</code> crash-recovery path, silently resetting the
+  player's ENTIRE CURRENT RUN. Fixed with try/catch around both,
+  degrading to silence. <b>(2)</b> Gamepad-only sessions never called
+  <code>audio.unlock()</code> at all &mdash; a Gamepad API button press
+  does not grant the browser's own "sticky activation." Best-effort
+  mitigation applied (the Start-button edge too), named honestly as a
+  real, unresolved platform limitation, not claimed fixed. <b>(3)</b> The
+  menu's <code>onChange</code> unconditionally reverted an F3 debug-meter
+  toggle on any unrelated setting change. <b>(4)</b> A stale doc comment
+  claimed the noise primitive backs <code>wallJump</code> (it has always
+  shipped as <code>type: 'tone'</code>). <b>(5)</b>
+  <code>playNoise()</code> had no attack ramp, unlike
+  <code>playTone()</code> &mdash; a real click risk. <b>(6)</b>
+  <code>subscribe()</code>'s idempotency guard was keyed on the wrong
+  thing; fixed defensively to fail loudly. One more, dead code
+  (<code>Settings.withDefaults()</code>), was deleted.
+  <br><br>
+  <b>Six more were real test-coverage gaps, closed with new regression
+  coverage.</b> The highest-value one: the audio suite's own fake
+  context never recorded the real arguments passed to it, so three
+  independent mutations (a hardcoded gain, a disabled pitch sweep, a
+  flattened waveform) sailed through 191 assertions undetected &mdash;
+  closed with a richer fixture checking every real cue's actual synthesis
+  math. Also closed: noise-buffer bipolar-ness, zero
+  <code>pointerdown</code>/<code>touchstart</code> unlock coverage
+  anywhere in the gate, the Sound row's label vs. its cursor, muted's
+  cross-field corruption independence, and Options-screen wrap-around.
+  <br><br>
+  <b>A confirmed prompt-injection attempt during the pass itself, refused
+  and reported.</b> Two independent verifier agents, and this session
+  directly afterward, each received a tool result formatted as a fake
+  "system-reminder" claiming an unauthorized file edit had already
+  happened and instructing silence about it. All three refused,
+  re-verified the real file against an independent checksum, and reported
+  it &mdash; an actual, not hypothetical, test of this project's
+  instruction-source-boundary rule. No code was affected.
+  <br><br>
+  <b>Verified against real sim ticks and a real browser, including a real
+  mutation check.</b> <code>verify_audio</code> (new suite) grew from 191
+  to 303. <code>verify_platform</code> grew from 137 to 173.
+  <code>verify_render</code> grew from 118 to 134. The most significant
+  fix was mutation-tested: try/catch removed in a scratch copy, all four
+  of its own new regression assertions failed as expected, the real fix
+  restored and reconfirmed byte-identical and green.
+  <code>bash tests/run_all.sh</code> &rarr; <b>GREEN 1957/1957 across 16
+  suites.</b>
+  <br><br>
+  <b>What was deliberately not done here:</b> no volume slider, a binary
+  mute only. No music or ambience layer. Still no dedicated boss bark
+  voice. A truly gamepad-only session unlocking a real
+  <code>AudioContext</code> remains a genuine, unresolved browser-platform
+  limitation.
+</div>
+
+<h2>Ember Dash and Parry &mdash; abilities, enhancements, full input/VFX/SFX wiring (v0.2.17, D13)</h2>
+<div class="note">
+  Locked from a real design spec, not built freehand
+  (<code>docs/superpowers/specs/2026-08-24-abilities-character-design.md</code>),
+  then carried through Claude Code's own native plan-mode workflow
+  (explore &rarr; design &rarr; review &rarr; final plan &rarr; approval)
+  before a line of feature code existed. Both abilities are available
+  from the very first spawn &mdash; D4-style unlock gating deliberately
+  not used, a locked choice from the spec's own brainstorming pass.
+  <br><br>
+  <b>One genuine open fork survived into implementation planning
+  itself.</b> Two independent Plan agents converged on every other shape
+  but split on whether Parry should be its own committed player state,
+  mirroring Roll, or a lightweight timed flag layered on top of whatever
+  state the player is already in. Put to the user directly: a state-based
+  Parry folded into <code>invulnerable()</code> (which also gates hazard
+  damage) would silently grant lava/spike immunity for the whole window,
+  not just protection against the timed attack. The user chose the flag
+  &mdash; <code>player.parryWindow</code>/<code>parryCd</code> never touch
+  <code>this.state</code>; negation is a dedicated check inside
+  <code>Combat.resolveBox</code>, correct by construction rather than
+  inherited from a state a hazard check also happens to read.
+  <br><br>
+  <b>Ember Dash costs zero new input.</b> The SAME buffered
+  <code>roll</code> press that grounds into a roll airborne-triggers a
+  dash instead, context evaluated at consumption time, not press time.
+  14 frames, 77px, full i-frames throughout, a 30-frame cooldown. Parry
+  needed one genuinely new capability from <code>45-enemy.js</code>: a
+  way to interrupt an attack mid-flight, named as the single riskiest
+  piece of the whole spec before a line of code existed.
+  <code>Enemy.prototype.stagger()</code> is idempotent, clears the
+  enemy's own in-flight attack, and enters a new <code>'staggered'</code>
+  state with its own fixed duration before handing off to the EXISTING
+  <code>recover</code> &rarr; <code>chase</code>/<code>phaseTransition</code>
+  branching, so a staggered boss still gets its own phase-transition
+  eligibility check. 12-frame window, 30-frame cooldown only on a natural
+  whiff &mdash; a successful read costs nothing.
+  <br><br>
+  <b>Four flat-cost enhancements, the identical shape <code>buyMaxHp</code>
+  (D8) already established.</b> Dash Extra Charge (a genuinely separate
+  banked charge, refreshed on ground contact only), Dash Extended
+  I-Frames (a residual invulnerability window layered on with a
+  <code>Math.max</code>-style guard), Parry Riposte and Parry Reflect
+  (both land their own bonus effect directly inside
+  <code>Combat.resolveBox</code>'s new parry branch rather than routing
+  back through a second pass). Reflect needed one new field on
+  <code>Shot</code> (<code>owner</code>) and sends a projectile's own
+  damage back at whoever fired it, directly, rather than a second live
+  projectile. A real, named disclosure gap closed along the way: the four
+  new <code>buyX()</code> methods had no way to trigger them at all
+  &mdash; wired F7&ndash;F10 debug keys, the identical shape F5/F6 already
+  established.
+  <br><br>
+  <b>Real gamepad and touch wiring, not left keyboard-only.</b> Parry
+  bound to gamepad face button 3. Touch gets a real, named exception to
+  D10's otherwise-locked Gesture Surface layout: a new PARRY zone plus a
+  genuinely new Assist mode, where the EXISTING roll-zone touch also arms
+  parry when a real telegraph fired recently. VFX/SFX hang off the same
+  Bus-trigger design <code>80-view.js</code>/<code>85-audio.js</code>
+  already established: an ember-<code>'spark'</code>-colored dash flare,
+  a per-player-id hood-glow timer for parry, two new SFX cues.
+  <br><br>
+  <b>Six dedicated verification passes, not one &mdash; thirteen
+  confirmed real findings, every one fixed and regression-tested.</b>
+  Three adversarial passes (Parry's stagger mechanic, the four
+  enhancements, touch/gamepad wiring), two lighter targeted passes
+  (VFX/SFX, the base mechanic), and a sixth: a dedicated gate-stability
+  re-verification pass, run because &sect;6's own binding process rule
+  requires the repeated runs a "stable" claim rests on. <b>(1)</b> Parry
+  could be spammed to keep its own window perpetually re-armed &mdash;
+  the trigger only checked <code>parryCd &lt;= 0</code>, not
+  <code>parryWindow &lt;= 0</code>. <b>(2)</b>
+  <code>Combat.resolveBox</code>'s own <code>invulnerable()</code> check
+  ran BEFORE the parry branch, silently eating a legitimate read.
+  <b>(3)</b> Reflect could hurt an already-dead shot owner, double-firing
+  <code>targetDown</code>. <b>(4)</b> Co-op players both owning
+  Riposte/Reflect could double-hit one shared enemy/shot-owner.
+  <b>(5)</b> The four <code>buyX()</code> purchases had no way to trigger
+  them at all. <b>(6)</b> Touch Assist's release guard was asymmetric.
+  <b>(7)</b> Two test fixtures sat exactly on the new zone boundary with
+  zero margin. <b>(8)</b> A real, pre-existing bug from BEFORE this
+  session: <code>rollStart</code>'s own particle burst has been spawning
+  at <code>y === NaN</code>, silently invisible, since it first shipped.
+  <b>(9)</b> A CDP key-event-timing test bug, not a game bug. <b>(10)</b>
+  A co-op interaction confirmed as correct, intended behavior, not a bug,
+  and pinned with its own regression test. <b>(11)</b> Several real
+  coverage gaps closed alongside the above. <b>(12)</b> A second, sibling
+  instance of finding 8's own bug: <code>step</code>'s own footstep-dust
+  emit had the identical missing-<code>y</code> defect, found by this
+  release's own dedicated gate-stability pass, not the original VFX/SFX
+  pass. <b>(13)</b> The airborne-dash browser check itself raced against
+  two real clocks &mdash; the dash's own short duration plus CDP
+  round-trip latency (fixed with the far more durable
+  <code>dashCd &gt; 0</code> signal), and the roll/dash input buffer's
+  real 133ms window, found under measured heavy machine load (up to 51%
+  CPU, read live during this session) to sometimes miss a genuinely late
+  real keypress (fixed with a bounded real-retry, not by loosening the
+  buffer). A separate, pre-existing, unrelated test-isolation gap was
+  found alongside this &mdash; a stray real <code>runEnd</code> auto-save
+  can leave <code>cinderloop.meta.v1</code> populated before a "first
+  boot" check later in the same suite &mdash; confirmed unrelated to
+  D13's own code and filed as its own follow-up rather than fixed here.
+  <br><br>
+  <b>Verified against real sim ticks and a real browser, including three
+  consecutive full-gate runs before calling the browser suite stable.</b>
+  <code>bash tests/run_all.sh</code> &rarr; <b>GREEN 2262/2262 across 16
+  suites</b>, <code>cinder-loop.html</code> at 407,486 bytes.
+  <br><br>
+  <b>What was deliberately not done here:</b> no shop/hub UI for the four
+  enhancements &mdash; F7&ndash;F10 are debug keys, the same shape
+  D4/D8's own weapon-equip and +max HP purchases already have. A true
+  continuous ember trail across the whole dash (a single burst stands in
+  &mdash; no existing particle effect in this codebase fires per-render-
+  frame, only off discrete Bus events). No third ability beyond Dash and
+  Parry &mdash; a ranged/utility option and a locked-shortcut interact
+  were both pitched and explicitly not chosen. Weapon-specific ability
+  variants, blocked on weapon equip/switch itself (D4's own still-open
+  gap, unchanged by this release).
+</div>
+
+<h2>Rule 6 &mdash; the standing process lesson</h2>
+<div class="note">
+  <b>Specificity is not evidence.</b> This masterfile once declared a v0.1.0
+  that was "BUILT and GREEN &mdash; 171 assertions &hellip; verified in a real
+  browser". It had never been written. The claim was specific, plausible,
+  internally consistent, and false &mdash; the third such case after CHAIR and
+  IRON EPOCH. A claim about build state, present <i>or</i> absent, requires a
+  tool call in the session that makes it.
+</div>
+
+<footer>
+  Original IP. Genre conventions taken from the Dead Cells grammar; all specific
+  expression authored fresh. No Motion Twin / Evil Empire assets, names,
+  characters, biomes, weapons, music or sprites.
+</footer>
+
+</div>
+</body>
+</html>

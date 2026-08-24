@@ -1,0 +1,78 @@
+<h2>What should happen when the player dies?</h2>
+<p class="subtitle">This is the one choice that decides almost everything else about the room/checkpoint feature — so let's look at it before anything else.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">A — Pure roguelite (what CINDER LOOP has today, D1)</div>
+    <div class="mockup-body">
+      <div class="flow">
+        <div class="flow-box">Spawn — fresh run, fresh stats</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box">Fight through the level</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box">Clear → Boss</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box flow-die">Die — anywhere, anytime</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box flow-end">Spend currency → brand-new run, brand-new level</div>
+      </div>
+      <p class="flow-note">One life per run. A death is never "reset to nearby" — it's the run ending. Progress that persists is only the meta-currency/blueprints (65-meta.js), never position.</p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">B — Checkpoint resume (Castlevania / Hollow Knight)</div>
+    <div class="mockup-body">
+      <div class="flow">
+        <div class="flow-box">Enter room</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box">Fight, clear the room</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box flow-save">Checkpoint lights up</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box flow-die">Die — anywhere after that point</div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box flow-end">Respawn AT the checkpoint — same run continues</div>
+      </div>
+      <p class="flow-note">Death is a local setback, not a run-ending event. The "run" itself may not exist as a concept at all — more like one long expedition through the castle/game world.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <p><b>Why this matters:</b> D1 (this project's very first locked decision) says "the loop is the product... a biome without a death-and-spend cycle is a platformer demo." Model A is what's built and what 65-meta.js's currency/blueprint system assumes. Model B is what "hit a save point" usually implies in the games you named — but it changes what death MEANS, which changes the currency economy, the meta-progression pacing, and probably the pitch of the whole game.</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Keep pure roguelite (D1 intact)</h3>
+      <p>Rooms/checkpoints are PACING and STRUCTURE within one run — not a death-recovery mechanic. Death still ends the run exactly like today.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Switch to checkpoint resume</h3>
+      <p>Death respawns you at the last checkpoint within the same attempt. This is a real, deliberate departure from D1 — a mode change, not an addition.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid — checkpoints exist, but death still ends the run</h3>
+      <p>Checkpoints matter for PACING/SAVE-AND-QUIT and maybe partial reward banking, but a death mid-run is still final, matching D1. (I'll explain what a "checkpoint" even means under this option if you pick it.)</p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 2px; margin: 12px 0; }
+  .flow-box { background: var(--panel-2, rgba(127,127,127,0.12)); border: 1px solid var(--border, rgba(127,127,127,0.3)); border-radius: 6px; padding: 8px 12px; font-size: 13px; text-align: center; }
+  .flow-arrow { text-align: center; opacity: 0.5; font-size: 14px; line-height: 1; }
+  .flow-die { border-color: #c0392b; color: #c0392b; }
+  .flow-save { border-color: #d4a017; color: #d4a017; }
+  .flow-end { font-weight: 600; }
+  .flow-note { font-size: 12px; opacity: 0.75; margin-top: 8px; }
+</style>
