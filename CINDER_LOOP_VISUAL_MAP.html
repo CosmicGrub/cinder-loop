@@ -118,7 +118,7 @@
 <header>
   <h1>CINDER LOOP</h1>
   <div class="sub">Visual map &middot; companion to CINDER_LOOP_MASTERFILE.md and CINDER_LOOP_CHANGELOG.md</div>
-  <div class="status">v0.2.19 &middot; 2026-08-24 &middot; GREEN 2505/2505 &middot; Weapon equip &amp; switch &mdash; player.weapon goes live, real input, 3 adversarially-found bugs fixed (D15)</div>
+  <div class="status">v0.2.20 &middot; 2026-08-25 &middot; GREEN 2600/2600 &middot; The summon primitive &mdash; elite Caller, ctx.addEnemy bridge, 5 adversarially-found bugs fixed (D16)</div>
 </header>
 
 <h2>Module stack &mdash; strict one-way dependency</h2>
@@ -131,12 +131,13 @@
   <div class="row"><span class="file">30-player.js</span><span class="what">run, jump, double jump, wall slide/jump, ledge grab/mantle, roll, crouch, slam, hazards, death, respawn, D2 stats + gainStat(), Ember Dash + Parry window (D13), canSwitchWeapon() (D15)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">35-rig.js</span><span class="what">skeletal poses, hitbox bake at boot, overreach audit (L9, D6)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">40-combat.js</span><span class="what">attack machine, hit resolution, combos, cancels, hitstop policy, D2 weapon scaling, slam impact, parry negate+stagger + Riposte/Reflect hooks (D13)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">45-enemy.js</span><span class="what">enemy entities, per-instance-seeded brains, the fairness rule, stagger() + 'staggered' state (D13)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">45-enemy.js</span><span class="what">enemy entities, per-instance-seeded brains, the fairness rule, stagger() + 'staggered' state (D13), 'summon' case + callIn()/doSummon() (D16)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">50-gen.js</span><span class="what">procedural generator + fairness audit (D3a)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">55-boss.js</span><span class="what">Kilnwarden &mdash; two-phase boss + arena, kept OUT of DATA.ENEMIES (D9)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">56-caller.js</span><span class="what">the Caller &mdash; elite 'summon' template, kept OUT of DATA.ENEMIES the same way Kilnwarden is (D16)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">60-run.js</span><span class="what">run loop: spawn &rarr; clear &rarr; boss &rarr; death &rarr; spend &rarr; respawn (D1), room chain: roomIndex + deriveRoomSeed (D14)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">65-meta.js</span><span class="what">persistence, blueprints, +max HP capability unlock (D4/D8), four Dash/Parry enhancement flags (D13), lastWeapon (D15)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16)</span><span class="tag">BUILT</span></div>
   <div class="boundary"><span>PRESENTER BOUNDARY &mdash; L5</span><i>.</i><span>nothing above may know anything below</span></div>
   <div class="row"><span class="file">80-view.js</span><span class="what">the ONLY place an event becomes an effect: renderer, camera rig, particles, dashStart/parry bursts + per-player parryGlow (D13)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12)</span><span class="tag">BUILT</span></div>
@@ -144,7 +145,7 @@
   <div class="row"><span class="file">90-settings.js</span><span class="what">settings model: sanitize / serialize / rebind, storage-agnostic, touchParryAssist (D13), switchWeapon default key (D15)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">92-menu.js</span><span class="what">in-canvas pause / options menu &mdash; chrome only, no sim knowledge, Touch Parry Assist row (D13)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">94-touch.js</span><span class="what">touch input: zoneAt + Stick hysteresis (pure) + DOM shell (D10), PARRY zone + Assist wiring (D13)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">95-app.js</span><span class="what">boot, accumulator, keyboard + gamepad, pause, DPR resize, lazy touch layer, parry gamepad binding + F7-F10 debug buys (D13), gamepad button 4 + weaponSwitch&rarr;saveMeta hook (D15)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">95-app.js</span><span class="what">boot, accumulator, keyboard + gamepad, pause, DPR resize, lazy touch layer, parry gamepad binding + F7-F10 debug buys (D13), gamepad button 4 + weaponSwitch&rarr;saveMeta hook (D15), F11 debug Caller spawn + live-count guard (D16)</span><span class="tag">BUILT</span></div>
 </div>
 
 <h2>The gate &mdash; tests/run_all.sh</h2>

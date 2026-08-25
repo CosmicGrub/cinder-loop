@@ -5,6 +5,163 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.20 — 2026-08-25 — The summon primitive: elite Caller, ctx.addEnemy bridge, 5 adversarially-found bugs fixed (D16)
+
+**GREEN: 2600/2600 assertions across 17 suites (one NEW suite this
+release — `verify_caller`, 86/86 assertions across 21 parts).
+`cinder-loop.html`, 444,677 bytes.** A fifth enemy attack primitive,
+`attack: 'summon'`, is real and reachable for the first time since D9
+locked the regular four-template roster. D9's own framing already
+priced this: "the engine knows four movement/attack primitives... a
+fifth archetype costs one new primitive" (`45-enemy.js`'s own header).
+D16 is that primitive, realized as exactly one elite template — the
+Caller (`src/56-caller.js`, a new file numbered right after
+`55-boss.js`) — kept OUT of `DATA.ENEMIES`/`ENEMY_IDS` the same way
+Kilnwarden is (`verify_enemy.js:32` still asserts
+`DATA.ENEMY_IDS.length === 4`).
+
+**D16 (`docs/superpowers/specs/2026-08-24-summon-primitive-design.md`,
+ranked #2 of the post-D13 roadmap, right behind D15), locked before a
+line of code existed.** `Sim.prototype.addEnemy` (`70-sim.js`) already
+existed, real and tested, producing a collision-safe, deterministic
+per-instance seed from position — the primitive landed nearly free on
+top of already-proven infrastructure, not new machinery.
+
+**The mechanism: one new telegraph case, one new post-commit state, one
+new ctx bridge.** `Enemy.prototype.doTelegraph`'s attack switch
+(`45-enemy.js:396`) gains a sibling to the existing `'shoot'` case:
+`case 'summon': this.callIn(ctx); this.enter('summon'); break;`.
+`Enemy.prototype.callIn` (`45-enemy.js:452`) is the real primitive —
+guarded by `this.summonsUsed >= m.summonMax` at entry, a safe no-op
+once the Caller's lifetime cap is spent rather than a crash or a
+re-summon past the cap. It calls `ctx.addEnemy(m.summonId, spawnX,
+spawnY)` once per `m.summonCount`, incrementing `this.summonsUsed` — a
+new field zeroed in `resetTransient()` (`45-enemy.js:147`) alongside
+every other per-life field, enforcing a LIFETIME cap across the whole
+encounter, not a per-cast budget. `ctx.addEnemy` (`70-sim.js:87`) is a
+two-line mirror of the existing `ctx.addShot`, delegating to
+`Sim.prototype.addEnemy` unchanged. `'summon'` gets its own real
+post-commit state, `Enemy.prototype.doSummon` (`45-enemy.js:502`) — a
+near-copy of `'shoot'`'s own `doShoot()` body — rather than skipping
+straight to `'recover'`: a deliberate correction over the original
+pitch, which proposed `this.enter('recover')` directly after the call
+fires. Every OTHER primitive in the game gives the player a real
+post-commit punish window; skipping it for `'summon'` would have made
+the Caller the only primitive in the game with zero vulnerability the
+instant it commits. Summoned adds are excluded from room-clear/kill-
+currency by the SAME existing `_levelRosterIds` mechanism (`70-sim.js`)
+that already excludes the boot-path practice Dummy — no new exclusion
+logic needed. Reachable for v1 only via a new debug key, `F11`
+(`95-app.js:533`, the next free slot after F2-F10) — real
+procedural-generation placement (`50-gen.js`/`RunLogic.placeEnemies`)
+stays explicitly out of scope, a larger follow-up that would touch
+D3a's own fairness-audit pipeline. Manually playtested this session in
+a real browser build: F11 spawns a real Caller, driven forward it
+reaches telegraph then summon and spawns a real Ashwalker.
+
+**A dedicated adversarial-verification pass (4 lenses, 17 raw findings,
+21 confirmed after consolidating duplicates) found and fixed five real
+production bugs:**
+
+1. **The spawn offset was terrain-blind.** The original design's own
+   claim — "no terrain-probing needed, gravity resolves it" — was false
+   when the offset spawn point landed inside solid terrain, e.g. a
+   room's own boundary walls, which span the full room height.
+   `moveY()` (`25-body.js:77`) only snaps a falling body out of the
+   TOPMOST solid row it overlaps; a deeply-embedded spawn re-triggers
+   that same snap every tick and climbs upward through solid rock
+   instead of falling, eventually clearing the top and free-falling
+   back down — reproduced end-to-end against the real classes (climbed
+   from y=586 to y=-24 over ~20 ticks in one repro). Fixed with a new
+   `ctx.rectSolid` bridge (`70-sim.js:95`, delegating to
+   `World.prototype.rectSolid`, `20-world.js:85`) that checks the REAL
+   summoned template's own footprint, not a guess, and falls back to
+   the Caller's own already-valid position when the offset spot is
+   embedded.
+2. **The per-index spawn spacing (`i * 12`) wasn't scaled by
+   `lockFacing`.** Dead in practice since the shipped template ships
+   `summonCount: 1`, but a real formula bug: for a Caller facing left,
+   successive spawns would have folded back toward, and eventually
+   past, the Caller instead of fanning further away. Fixed to scale
+   both the base offset and the fan-out term by `this.lockFacing`
+   symmetrically.
+3. **`summonsUsed` was excluded from `Sim.prototype.hash()`**, directly
+   contradicting its own `resetTransient()` comment's explicit claim of
+   parity with `activeMove`/`phase` (both of which ARE hashed) — two
+   sims differing only in that field would have hashed identically
+   forever, defeating the exact class of desync `hash()` exists to
+   catch. Fixed by adding it to the per-target hash tuple
+   (`70-sim.js:1326`).
+4. **`CFG.CALLER_SUMMON_OFFSET` was a permanently-dead fallback
+   expression.** The CFG key was never actually defined anywhere in
+   `00-core.js`, so the `|| 24` fallback always fired. Fixed by moving
+   the offset onto the Caller template itself as `summonOffset: 24` —
+   the same D7 "content is data" reasoning `summonId`/`summonCount`/
+   `summonMax` already follow, since this is elite-specific placement,
+   not an engine-wide tunable.
+5. **F11 had no guard against repeated/held-key spawning.** Unlike F2's
+   own guard on the identical shape (`sim.players.length < 2`) or
+   F7-F10's self-guarding `buyX()` purchases, a held F11 (real OS
+   key-repeat) could spawn an unbounded stream of full-hp Callers.
+   Fixed with a live-count cap — `sim.targets.filter(...).length < 3` —
+   mirroring F2's own guard pattern.
+
+**Also fixed (comment-accuracy, no behavior change):** `45-enemy.js`'s
+own file header still said "four primitives" and didn't name `'summon'`
+even though this diff added it in that very file — updated to five.
+`56-caller.js`'s own header, in an earlier draft, falsely claimed
+`45-enemy.js`'s header already named `'summon'` — corrected once the
+header fix above landed. `doRecover()`'s predecessor-state comment
+(`45-enemy.js:609`) omitted `'summon'` from its enumerated list of
+states that must have "fully resolved" before a transition is
+requested — added. The `summonId: 'ashwalker'` rationale ("shortest
+reach/telegraph of the four") was only half true against the real data
+in `10-data.js` — ashwalker genuinely has the shortest reach (26px, vs.
+emberrush's 130 / kilnspitter's 200 / wickmoth's 62) but NOT the
+shortest telegraph (wickmoth's 18 is lower than ashwalker's 20) —
+corrected in both the source comment and the design spec.
+
+**Roughly nine closed test-coverage gaps beyond the five bugs above,**
+all with regression tests in the new `tests/verify_caller.js` (mirrors
+`verify_boss.js`'s shape at smaller scale, 86 assertions across 21
+parts): two-player fairness for the Caller's own commit AND,
+independently, for a freshly-summoned add (named as risk #5 in the
+implementation plan, shipped unaddressed in the first pass — proving
+the add runs its own `acquire()`, not an inherited copy of the Caller's
+target, by moving the Caller's own target out of the add's much shorter
+sight range); the `callIn()` missing-ctx defensive guard branch;
+killing the Caller after it has already summoned leaves the summoned
+add alive and fully functional (the "no parent/child link" claim,
+previously asserted only in prose, now proven directly in the opposite
+kill order from the existing roster-exclusion coverage); the
+`summonCount > 1` loop body (both facing directions' spacing, and the
+mid-loop `summonMax` cap-break when the cap isn't a multiple of the
+count); the summoned Ashwalker proven to be a real, fully-functional
+enemy — it can acquire, telegraph, and actually land a hit through
+`Combat.resolveBox`, not just tid-match; `dangerous()` stays false
+during `'recover'` too, not just `'telegraph'`/`'summon'`; the
+hash-coverage regression for `summonsUsed` itself (doubles as bug 3's
+own regression test); and a near-ledge spawn-safety sanity check — the
+other half of "no terrain-probing needed," proving an open-air offset
+spawn falls and settles sanely with no NaN/stuck physics.
+
+**Verified against real sim ticks and a real browser (L8).**
+`bash tests/run_all.sh` → **GREEN 2600/2600 across 17 suites**.
+
+**What was deliberately not done here — named honestly, not silently
+dropped (spec §9, unchanged).** No real procedural-generation placement
+(`50-gen.js`/`RunLogic.placeEnemies`) — debug-key-only for v1. No
+re-summoning after a summoned add dies — `summonMax` is a lifetime cap
+on the Caller's own casts, not a "keep N alive" budget. No parent/child
+lifecycle link between the Caller and its summons — killing the Caller
+does not despawn what it already summoned. No spawn-in VFX/SFX for the
+summoned add appearing. The `'summon'` verb is not retrofitted onto any
+regular `DATA.ENEMIES` template. No second elite reusing this same
+primitive with different numbers — this spec covers exactly one
+template, the Caller.
+
+---
+
 ## v0.2.19 — 2026-08-24 — Weapon equip & switch: player.weapon goes live, real input, 3 adversarially-found bugs fixed (D15)
 
 **GREEN: 2505/2505 assertions across 16 suites (no new suite this
