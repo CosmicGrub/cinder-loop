@@ -281,6 +281,7 @@ measurement of the code that is actually on disk.
 | D14 | A level becomes a linear chain of `CFG.ROOM_COUNT` (3) procedurally-generated combat rooms plus the existing boss room — not a branching graph, not hand-authored combat content — reusing the exact mid-run teardown-and-reload shape `_enterLevel()`/`_enterBoss()` already established via a new `Sim.prototype._enterRoom(i)` called in a loop instead of once, each room independently fairness-audited by the same D3a machinery at smaller `CFG.ROOM_BEATS`/`ROOM_PICKUPS` dimensions and its own `RunLogic.deriveRoomSeed`-derived seed. A checkpoint fires the instant a room's roster clears (`_onRoomClear()`), deliberately decoupled from reaching the room's own exit — `_healAtCheckpoint()` (a fraction of MISSING hp, never a flat number) and `_handInCarriedBlueprints()` (a helper extracted out of `_commitPendingLevel()` so the SAME hand-in logic now fires at every checkpoint, not just true run-end) both land immediately, giving the player a real, player-paced window to act before the door itself unlocks. Death still ends the whole run exactly as D1 defines it — no mid-run "continue," a hybrid explicitly chosen over a bonfire/save-crystal model. Cinders (a second, riskier income stream into the same `meta.currency` pool, D8) are scoped and reserved for the mechanic's own follow-up — `CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` and three Bus events (`cinderDrop`/`cinderLost`/`cinderBanked`) exist, and the tube's own physical anchor point is real and reachability-audited (`_buildCheckpointAlcove()`) — but the drop/carry/bank mechanic itself (`player.carriedCinders`, a drop-on-kill roll, a bank-at-tube interaction) has no wired implementation yet; named honestly in §5q, not silently claimed complete. | rooms give a level real internal pacing (Dead Cells/Castlevania/Hollow Knight-style structure) without touching D1's own locked run-loop identity — reusing `_enterLevel()`'s existing shape was the single biggest risk-reducer available, over inventing new machinery; decoupling checkpoint-fires-on-clear from advance-fires-on-clear-AND-exit is what actually earns a real decision point rather than an invisible auto-save |
 | D15 | `player.weapon` goes live for the first time since v0.2.8. `Sim.prototype.switchWeapon(playerIndex, weaponId)` is the real primitive — validates `player.alive()`, `canSwitchWeapon()`, and `DATA.WEAPON_IDS` membership before consulting `MetaLogic.isUnlocked` — gated on `!player.attack`, a correctness requirement rather than a feel choice: `Combat.step` re-reads `player.weapon` every tick an attack resolves (`Combat.weaponScale`, `40-combat.js:302-313`), so a mid-swing switch would silently reweight an in-flight move's damage using the new weapon's stat-colour pair instead of the one the move actually belongs to. `Sim.prototype.cycleWeapon(playerIndex)` is the thin wrapper the one v1 input trigger (gamepad button 4 / `KeyI`) actually calls, consumed in a new phase 0 of `Sim.prototype.step` — before attack input, so a same-tick switch-then-swing combo correctly attacks with the newly-equipped weapon — in the SIM layer, not the presenter, matching every other action already consumed there. `meta.lastWeapon` is captured immediately inside `switchWeapon()` itself, on player 0's own explicit switch, deliberately NOT a run-end snapshot — reading the real reset-timing source found a run-end capture would need a second, `blueprintLost`-style timing hook to handle a player-0 death correctly, real avoidable complexity a capture-on-switch design sidesteps entirely. | this is the single largest already-built-but-inert surface in the game closing at once — D9's four weapons and D2's entire per-weapon colour-scaling axis have been dead build-diversity from a player's perspective since v0.2.8; gating on attack-state alone is both necessary and sufficient because `player.weapon` is read nowhere else, so no second, broader lock is needed |
 | D16 | A fifth enemy attack primitive, `attack: 'summon'`, realized as exactly one elite template — the Caller (`src/56-caller.js`, kept OUT of `DATA.ENEMIES`/`ENEMY_IDS` the same way Kilnwarden is, D9's roster staying hard-pinned at four). `Enemy.prototype.doTelegraph`'s attack switch (`45-enemy.js:396`) gains `case 'summon': this.callIn(ctx); this.enter('summon'); break;`, and `'summon'` gets its own real post-commit state — `Enemy.prototype.doSummon` (`45-enemy.js:502`), a near-copy of `'shoot'`'s own `doShoot()` — rather than falling straight to `'recover'`, a correction over the original pitch that would have made the Caller uniquely safe the instant it commits, unlike every other primitive in the game. `Enemy.prototype.callIn` (`45-enemy.js:452`) calls a real, independent Ashwalker into the fight through a new `ctx.addEnemy` bridge (`70-sim.js:87`, a two-line mirror of the existing `addShot`), gated by `this.summonsUsed >= m.summonMax` — a LIFETIME cap across the whole encounter, not a per-cast budget, reset in `resetTransient()` alongside every other per-life field. Summoned adds are excluded from room-clear/kill-currency by the SAME existing `_levelRosterIds` mechanism that already excludes the boot-path practice Dummy — no new exclusion logic needed. Reachable for v1 only via a new debug key, `F11` (`95-app.js`). | D9's own framing already priced this: "the engine knows four movement/attack primitives... a fifth archetype costs one new primitive" (`45-enemy.js`'s own header) — this is that fifth primitive, and `Sim.prototype.addEnemy` (`70-sim.js`) already existed, real and tested, making it nearly free to add on top of already-proven infrastructure rather than new machinery. A dedicated adversarial-verification pass (4 lenses, 17 raw findings, 21 confirmed after consolidating duplicates) found and fixed 5 real production bugs before this shipped — including a terrain-blind spawn offset that could climb a summoned add up through solid rock (the original design's own claim that "gravity resolves it" was false for a room's own full-height boundary walls) and a `summonsUsed` field excluded from `Sim.prototype.hash()` despite its own comment's claim of parity with `activeMove`/`phase` — proof the adversarial-verification discipline earns its keep on a feature this size, not a formality |
+| D21 | `82-narrative.js` finally subscribes to `'checkpoint'` (`bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });`, `82-narrative.js:126`) — the real Bus event D14's own `Sim.prototype._onRoomClear()` (`70-sim.js:1071`) already fires, with a declared consumer (D11's own reserved surface) that was never wired up until now. One new `DIALOGUE.narrator.checkpoint` line pool (`10-data.js`), sibling to `levelStart`/`bossEntry`/`reveal`/`bossVictory`/`death`. Zero new CFG, zero new Bus event, zero sim-file change — no branching on the payload's `healed`/`handedIn` fields, a single generic pool fires regardless, a named judgment resolved with the user over a two-pool tiered version (`checkpoint`/`checkpointFinal`) specifically to avoid `82-narrative.js` importing `CFG` for the first time in its history. | the cheapest system on the post-D13 roadmap, and correctly sequenced first in the revised Tier 1 — completes a declared-but-unbuilt half of D11 rather than opening a new design surface; preserving this file's zero-CFG-dependency purity was judged worth more than the modest texture gain a tiered pool would add |
 
 All remaining design answers take the ★ defaults recorded in the phased answer sheet.
 
@@ -1478,7 +1479,10 @@ Ashwalker into the fight through a new `ctx.addEnemy` bridge, gated by a
 lifetime `summonMax` cap, with its own real post-commit recovery window
 (`doSummon()`) rather than skipping straight to safety; reachable in v1
 only through a new `F11` debug key, real procedural placement named and
-explicitly deferred.
+explicitly deferred. **Since v0.2.21:** checkpoint narration (D21, §5t)
+— `82-narrative.js` subscribes to the `'checkpoint'` event D14 already
+fires, real and reading a genuine room-clear moment for the first time
+since that event's own reservation.
 
 **Designed, not built:** two of D8's four named meta-currency purchases —
 flask charges and a backpack slot — real, open design space with no
@@ -1526,7 +1530,13 @@ lifecycle link between the Caller and its summons (killing the Caller
 does not despawn what it already summoned); spawn-in VFX/SFX for the
 summoned add appearing; a second elite reusing the `'summon'` primitive
 with different numbers (this spec covers exactly one template, the
-Caller).
+Caller). **Since v0.2.21 (D21, §5t):** reacting to the `'checkpoint'`
+payload's `healed`/`handedIn` fields with distinct line variants
+(v2 — doubles content-authoring surface); any `'cinderBanked'`/
+`'cinderLost'` reaction (blocked on the cinder economy itself, D14's own
+still-open follow-up); the two-pool tiered version (`checkpoint`/
+`checkpointFinal`) — a real, legitimate future enhancement, not ruled
+out permanently, just not built now.
 
 **Scaffolding that must be deleted, not built on:** `demoLevel()` in
 `95-app.js` is retired from the primary boot path as of v0.2.6 (§5e) — boot
@@ -3880,6 +3890,76 @@ appearing. The `'summon'` verb is not retrofitted onto any regular
 `DATA.ENEMIES` template. No second elite reusing this same primitive
 with different numbers — this spec covers exactly one template, the
 Caller.
+
+---
+
+## 5t. Checkpoint narration (v0.2.21, D21)
+
+**Finishing a declared consumer, not opening a new design surface.**
+D11's own architecture reserves two Bus-driven reaction pools —
+`82-narrative.js` for lines, `85-audio.js` for cues — off any real sim
+event worth narrating. D14 (v0.2.18) added exactly such an event,
+`'checkpoint'`, fired from `Sim.prototype._onRoomClear()`
+(`70-sim.js:1071`, `{roomIndex, healed, handedIn}`) the instant a room's
+roster clears — and shipped with nothing subscribed to it. D21
+(`docs/superpowers/specs/2026-08-25-checkpoint-narration-design.md`,
+Tier 1's top item on the revised post-D13 roadmap) closes that gap, the
+same "scope it, then build it" discipline every prior D-decision in this
+project has used.
+
+**The whole change: one subscription, one pool.**
+`Narrative.prototype.subscribe` (`82-narrative.js:117-126`) gains a
+sibling to its existing `'telegraph'` subscription:
+```js
+bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });
+```
+Reuses the already-real `_say(pool, ttl)` (`82-narrative.js:131-135`) and
+`LINE_TTL_MS` (`82-narrative.js:59`) verbatim — no new method, no new
+Bus event (`'checkpoint'` is already whitelisted, D14), no new CFG. One
+new `DIALOGUE.narrator.checkpoint` line pool (`10-data.js`), sibling to
+`levelStart`/`bossEntry`/`reveal`/`bossVictory`/`death`, in a calmer
+register than `bossEntry` — a held breath rather than a warning — honoring
+D12's double-voice rule in content alone (one line, "Tempered a little
+more, and no dying required this time," directly echoes `death`'s own use
+of "tempered," tying the two pools together on reread).
+
+**Named judgment, resolved with the user: one generic pool, not two
+tiered ones.** The original pitch offered a fork — a single pool, or two
+(`checkpoint`/`checkpointFinal`, the latter keyed on `roomIndex ===
+CFG.ROOM_COUNT - 1`). The tiered version would have required importing
+`CFG` into `82-narrative.js` for the first time in this file's history —
+confirmed by reading it in full: it currently imports only `RNG` and
+`DIALOGUE`, matching its own stated architectural purity ("chosen text
+has zero effect on sim state," its header's own words). Decided in favor
+of the single pool specifically to preserve that property, the same
+reasoning that makes this the cheapest system on the whole roadmap.
+
+**What's inherited for free, not built new.** Death-always-wins priority
+and the once-per-frame display-slot overwrite needed no new logic —
+`_onRoomClear()`'s own `!justDied` guard already keeps `'checkpoint'`
+from ever firing the same tick a death does, and `_show()`'s existing
+unconditional overwrite is the same "whichever fires last wins the box"
+rule every other narrator/bark collision already has.
+
+**Verified against real sim ticks (L8), no dedicated adversarial pass.**
+`bash tests/run_all.sh` → **GREEN 2611/2611 assertions across 17
+suites** (`verify_narrative` grew from 65 to 76), `cinder-loop.html` at
+446,017 bytes. Named honestly: unlike D14-D16, this change carries none
+of the surfaces that kept producing real bugs on a first pass (no hash
+coverage, no terrain math, no save-hook timing, no new integration
+bridge) — a full multi-lens adversarial-verification workflow was judged
+overkill for a presenter-only, zero-sim-effect subscription this size,
+and skipped in favor of two direct checks: a dedicated test proving the
+pool fires identically regardless of the `'checkpoint'` payload's
+`healed`/`handedIn` values (no branching, matching the spec's own scope
+exactly), and a manual tone read confirming the new lines sit distinctly
+from `bossEntry`/`death` and genuinely reread differently post-reveal.
+
+**What was deliberately not done here.** Reacting to `healed`/`handedIn`
+with distinct line variants (v2). Any `'cinderBanked'`/`'cinderLost'`
+reaction (blocked on the cinder economy itself). The two-pool tiered
+version named above — real future design space, not ruled out
+permanently.
 
 ---
 

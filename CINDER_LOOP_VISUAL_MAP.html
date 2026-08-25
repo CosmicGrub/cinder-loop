@@ -118,14 +118,14 @@
 <header>
   <h1>CINDER LOOP</h1>
   <div class="sub">Visual map &middot; companion to CINDER_LOOP_MASTERFILE.md and CINDER_LOOP_CHANGELOG.md</div>
-  <div class="status">v0.2.20 &middot; 2026-08-25 &middot; GREEN 2600/2600 &middot; The summon primitive &mdash; elite Caller, ctx.addEnemy bridge, 5 adversarially-found bugs fixed (D16)</div>
+  <div class="status">v0.2.21 &middot; 2026-08-25 &middot; GREEN 2611/2611 &middot; Checkpoint narration &mdash; 82-narrative.js finally subscribes to 'checkpoint' (D21)</div>
 </header>
 
 <h2>Module stack &mdash; strict one-way dependency</h2>
 <div class="stack">
   <div class="row"><span class="file">00-core.js</span><span class="what">RNG (per-instance seeded) &middot; Bus (typed) &middot; CFG (every tunable) &middot; math, room/checkpoint/cinders CFG + checkpoint/cinder EVENTS (D14), weaponSwitch EVENT (D15)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">05-input.js</span><span class="what">Pad / Pads &mdash; N-player array, first-press-safe edges, pending buffer, parry button + WINDOW entry (D13), switchWeapon button + WINDOW entry (D15)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">10-data.js</span><span class="what">tables: enemy roster (D9, 4 templates), weapons (D7/D9, 4 &mdash; roster complete). grafts still to come</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">10-data.js</span><span class="what">tables: enemy roster (D9, 4 templates), weapons (D7/D9, 4 &mdash; roster complete). grafts still to come, DIALOGUE.narrator.checkpoint pool (D21)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">20-world.js</span><span class="what">tilemap: empty / solid / one-way / hazard + queries</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">25-body.js</span><span class="what">AABB, axis-separated collision, sub-stepped, one-way + drop-through</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">30-player.js</span><span class="what">run, jump, double jump, wall slide/jump, ledge grab/mantle, roll, crouch, slam, hazards, death, respawn, D2 stats + gainStat(), Ember Dash + Parry window (D13), canSwitchWeapon() (D15)</span><span class="tag">BUILT</span></div>
@@ -140,7 +140,7 @@
   <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16)</span><span class="tag">BUILT</span></div>
   <div class="boundary"><span>PRESENTER BOUNDARY &mdash; L5</span><i>.</i><span>nothing above may know anything below</span></div>
   <div class="row"><span class="file">80-view.js</span><span class="what">the ONLY place an event becomes an effect: renderer, camera rig, particles, dashStart/parry bursts + per-player parryGlow (D13)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12), 'checkpoint' subscription (D21)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">85-audio.js</span><span class="what">synthesized Web Audio + real mute toggle, off the SFX table (D7/D11), +dashStart/parry cues (D13)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">90-settings.js</span><span class="what">settings model: sanitize / serialize / rebind, storage-agnostic, touchParryAssist (D13), switchWeapon default key (D15)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">92-menu.js</span><span class="what">in-canvas pause / options menu &mdash; chrome only, no sim knowledge, Touch Parry Assist row (D13)</span><span class="tag">BUILT</span></div>

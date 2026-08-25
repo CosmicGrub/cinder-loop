@@ -5,6 +5,60 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.21 — 2026-08-25 — Checkpoint narration: 82-narrative.js finally subscribes to 'checkpoint' (D21)
+
+**GREEN: 2611/2611 assertions across 17 suites (`verify_narrative` grew
+from 65 to 76 assertions, no new suite). `cinder-loop.html`, 446,017
+bytes.** D11's own architecture reserves two Bus-driven reaction pools
+off any real sim event worth narrating; D14 (v0.2.18) added exactly such
+an event, `'checkpoint'` (`Sim.prototype._onRoomClear()`, `70-sim.js`,
+`{roomIndex, healed, handedIn}`), and shipped with nothing subscribed to
+it — a declared consumer never wired up. D21 closes that gap, and
+nothing else: `Narrative.prototype.subscribe` (`82-narrative.js`) gains
+one sibling line to its existing `'telegraph'` subscription —
+`bus.on('checkpoint', function () { self._say('checkpoint',
+LINE_TTL_MS); });` — reusing the already-real `_say()`/`LINE_TTL_MS`
+verbatim. One new `DIALOGUE.narrator.checkpoint` line pool
+(`10-data.js`), sibling to the existing five narrator pools, in a
+calmer register than `bossEntry` and honoring D12's double-voice rule
+purely in content (one line echoes `death`'s own "tempered" directly).
+Zero new CFG, zero new Bus event (`'checkpoint'` was already
+whitelisted by D14), zero sim-file change — the cheapest system on the
+entire post-D13 roadmap, and it shipped exactly that cheap.
+
+**Named judgment, resolved with the user: one generic pool, not two
+tiered ones.** The original pitch offered a fork — a single pool, or a
+tiered `checkpoint`/`checkpointFinal` pair keyed on `roomIndex ===
+CFG.ROOM_COUNT - 1`. The tiered version would have required importing
+`CFG` into `82-narrative.js` for the first time ever — this file
+currently imports only `RNG`/`DIALOGUE`, matching its own header's own
+claim that chosen text has "zero effect on sim state." Decided in favor
+of the single pool specifically to keep that property genuinely true,
+not just asserted.
+
+**No dedicated adversarial-verification pass this release — named
+honestly, not silently skipped.** Unlike D14-D16, this change carries
+none of the surfaces that kept producing real bugs on a first pass (no
+hash coverage, no terrain math, no save-hook timing, no new integration
+bridge — this is a presenter-only Bus subscription with zero effect on
+sim state, by this file's own long-standing architectural constraint). A
+full multi-lens workflow was judged overkill for a change this size and
+this structurally risk-free; instead, two direct checks: a dedicated
+test proving the pool fires identically regardless of the
+`'checkpoint'` payload's `healed`/`handedIn` values (no branching, an
+explicit v1 scope limit), and a manual tone read confirming the five new
+lines sit distinctly from `bossEntry`/`death` and genuinely reread
+differently once the Kilnkeeper reveal has landed.
+
+**What was deliberately not done.** Reacting to `healed`/`handedIn` with
+distinct line variants (a real v2, not built now — doubles the
+content-authoring surface). Any `'cinderBanked'`/`'cinderLost'` reaction
+(blocked on the cinder economy itself not existing yet, D14's own
+still-open follow-up). The two-pool tiered version named above — real,
+legitimate future design space, not ruled out permanently.
+
+---
+
 ## v0.2.20 — 2026-08-25 — The summon primitive: elite Caller, ctx.addEnemy bridge, 5 adversarially-found bugs fixed (D16)
 
 **GREEN: 2600/2600 assertions across 17 suites (one NEW suite this
