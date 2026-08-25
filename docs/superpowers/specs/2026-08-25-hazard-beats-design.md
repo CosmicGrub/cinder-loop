@@ -55,6 +55,75 @@ attempt it. `CFG.GEN_ROLL_HAZARD_TILES` (4 tiles = 64px) leaves about
 the same kind of safety margin every other `GEN_*` capability ceiling
 in this file already takes below its own measured maximum.
 
+**This margin is necessary but not sufficient — see §1a.** Distance
+margin alone does not make a flat-rise gap landable: the real,
+unmodified collision model blocks a flat-rise roll from ever landing
+on the far platform, at any gap size, for a reason that has nothing to
+do with distance. §1a below is the physics prerequisite this whole
+spec turned out to depend on, added after the original design's
+distance-margin-only reasoning was verified empirically and found
+insufficient by itself.
+
+## 1a. The physics prerequisite: roll wall-leniency
+
+Verified directly against the real, unmodified sim (not assumed): a
+flat-rise hazard gap could not be crossed by Roll for **any** gap size
+1-8, regardless of whether the far platform was `TILE.SOLID` or
+`TILE.ONEWAY`. Root cause, traced through `25-body.js`:
+`Body.prototype.move` resolves the X axis completely before the Y axis
+every sub-step (`25-body.js:121-138`). A roll starts with zero
+vertical velocity flush against the ground; gravity sinks its hitbox
+into the shared row within 1-2 ticks — long before it can have
+crossed the gap horizontally (even one tile takes ~3.4 ticks at Roll's
+fixed speed). By the time it arrives at the far platform's
+x-position, `moveX` finds the far platform's own solid tile at that
+exact row and blocks it as a wall (`onWall`, dead stop, `vx` zeroed);
+if the far platform is `ONEWAY` instead, `moveY`'s "must be falling
+from above" check (`prevBottom > top`, `25-body.js:106`) refuses to
+catch a body that has already sunk too far, and it falls through
+instead. Neither tile kind lands, for any gap.
+
+**The fix, scoped as narrowly as the problem allows.** Two new `Body`
+fields: `wallLeniency` (bool, default `false`) and `leaveRow` (int,
+default `-1`) — inert for every entity that never sets them. `moveX`
+gains one new skip condition, sibling to its existing `ONEWAY` skip: a
+`SOLID` tile at row `ty` is not treated as a wall if
+`body.wallLeniency && ty === body.leaveRow`. Only
+`Player.prototype.update`'s roll-entry branch (`30-player.js:527-538`)
+ever arms these fields, at the instant a grounded roll begins
+(`b.leaveRow = world.tileY(b.bottom()); b.wallLeniency = true;`);
+`Player.prototype.endRoll` (`30-player.js:732-746`) disarms them. The
+window is bounded on both axes by construction, reusing existing state
+rather than inventing a new timer or constant: spatially to the single
+row the roll departed from (a multi-row-tall wall's other rows still
+block normally — confirmed empirically), temporally to the roll's own
+existing `rollFrames` duration (the leniency can never outlive the
+burst that armed it).
+
+Deliberately Roll-only, not Dash — Dash only ever triggers while
+airborne (`30-player.js:555`), so it has no grounded "row it just
+left" in the same sense, and Ember Dash crossing remains the separate,
+unmeasured follow-up §8 already named. Enemies are structurally
+unaffected: no `'roll'`/`'dash'` state exists anywhere in
+`45-enemy.js`, so nothing but the player's own roll-entry ever arms
+`wallLeniency`.
+
+**Known, accepted trade-off.** This exemption is not unique to
+generated hazard beats — it fires for any flat-rise gap a roll departs
+across, anywhere in the game, including a coincidental one the
+generator never intended as a hazard beat. That is the correct,
+desired consequence of fixing a real capability gap, not a leak: Roll
+becomes a consistently reliable way to cross a short flat gap
+everywhere, not a mechanic magically restricted to specifically-tagged
+beats. The one genuine remaining risk is narrower: a single-row-thin
+solid obstacle placed flush at a row a roll might depart from, with
+nothing above it, could be clipped past. Every wall this file's own
+`stamp()` or any hand-built level places is multiple tiles tall (this
+exemption only ever excuses the *one* row named `leaveRow`, never a
+wall's other rows), so this narrows to a real but rare hand-built-level
+edge case — worth a dedicated adversarial check before shipping, not a
+blocker on the design itself.
+
 **Symmetric, unlike `edgeAllowed`.** Since rise is always 0 here,
 roll-crossability is genuinely the same in both directions. Hazard
 edges are added to the graph in both directions (§2) — a deliberate,
