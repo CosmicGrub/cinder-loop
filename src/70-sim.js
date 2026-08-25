@@ -79,7 +79,20 @@ function Sim(opts) {
   var self = this;
   this.ctx = {
     rig: this.rig,
-    addShot: function (shot) { self.shots.push(shot); return shot; }
+    addShot: function (shot) { self.shots.push(shot); return shot; },
+    // D16 (summon primitive): a two-line mirror of addShot above, letting
+    // Enemy.prototype.callIn place a real, independent Enemy without
+    // reaching past ctx into Sim directly. Delegates to the already-real,
+    // already-tested Sim.prototype.addEnemy unchanged.
+    addEnemy: function (tid, x, y) { return self.addEnemy(tid, x, y); },
+    // Adversarially found (D16): callIn() needs to check a spawn point
+    // against real terrain before placing an enemy there. A FUNCTION, not
+    // a captured `self.world` reference — this.world is REPLACED wholesale
+    // on every room/boss transition (_enterRoom/_enterBoss), so a snapshot
+    // taken once at construction time would go stale the instant the
+    // first transition happened, the same staleness class rig/addShot's
+    // own function-not-reference shape already avoids.
+    rectSolid: function (x, y, w, h) { return self.world.rectSolid(x, y, w, h); }
   };
 
   this.rng = new RNG(this.seed);
@@ -1303,6 +1316,14 @@ Sim.prototype.hash = function () {
       // left open at the time; closed here rather than left to linger.
       t.phase === undefined ? 0 : t.phase,
       t.activeMove ? t.activeMove.id : '-',
+      // D16: Caller-only field, '0' for every regular template and the
+      // boss — the SAME parity with phase/activeMove this field's own
+      // resetTransient() comment already claims; adversarially found that
+      // the claim wasn't actually true until this line existed. Affects
+      // FUTURE ticks (callIn()'s own >= guard), the same "hash it
+      // directly rather than trust it's re-derivable" bar this.tube/
+      // meta.lastWeapon already hold to above.
+      t.summonsUsed === undefined ? 0 : t.summonsUsed,
       b.x, b.y, b.vx, b.vy, b.onGround ? 1 : 0
     );
   }

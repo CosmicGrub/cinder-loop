@@ -518,6 +518,22 @@ function boot(canvas, hud, seed) {
     if (e.code === 'F8') { if (sim.buyDashExtIframes()) saveMeta(sim.meta); }
     if (e.code === 'F9') { if (sim.buyParryRiposte()) saveMeta(sim.meta); }
     if (e.code === 'F10') { if (sim.buyParryReflect()) saveMeta(sim.meta); }
+    // D16 (summon-primitive spec §6): debug-only Caller spawn, a fixed
+    // distance in front of player 0 — the same direct sim.addEnemy() call
+    // the boot-path Dummy already makes via sim.addTarget() above,
+    // bypassing ctx entirely. Real procedural placement (50-gen.js) stays
+    // explicitly out of scope for v1 (spec §6/§9).
+    //
+    // Adversarially found: unlike F2's own guard on this exact repeat-key
+    // shape (sim.players.length < 2) or F7-F10's self-guarding buyX()
+    // calls, a held F11 (real OS key-repeat) had nothing stopping it from
+    // spawning an unbounded stream of full-hp Callers. Capped the same way
+    // F2 caps co-op join — a small live count, not a session total, so the
+    // key stays usable for testing more than one at a time.
+    if (e.code === 'F11' && sim.targets.filter(function (t) { return t.tid === 'caller' && t.alive(); }).length < 3) {
+      var pb = sim.players[0].body;
+      sim.addEnemy(C.Caller.template, pb.x + 80, pb.y);
+    }
   });
   window.addEventListener('keyup', function (e) {
     if (app.paused) return;

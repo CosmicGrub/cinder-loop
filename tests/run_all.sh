@@ -82,6 +82,7 @@ run_suite verify_combat
 run_suite verify_stats
 run_suite verify_enemy
 run_suite verify_boss
+run_suite verify_caller
 run_suite verify_gen
 run_suite verify_run
 run_suite verify_meta

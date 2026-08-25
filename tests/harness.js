@@ -23,7 +23,7 @@ const SRC = path.join(ROOT, 'src');
 const SIM_FILES = [
   '00-core.js', '05-input.js', '10-data.js', '20-world.js',
   '25-body.js', '30-player.js', '35-rig.js', '40-combat.js', '45-enemy.js',
-  '50-gen.js', '55-boss.js', '60-run.js', '65-meta.js', '70-sim.js'
+  '50-gen.js', '55-boss.js', '56-caller.js', '60-run.js', '65-meta.js', '70-sim.js'
 ];
 const VIEW_FILES = ['80-view.js'];
 // Presenter, source-scanned for the same invariants as the view (no
