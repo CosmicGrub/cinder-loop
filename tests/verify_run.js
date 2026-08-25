@@ -13,7 +13,7 @@
 const H = require('./harness');
 const s = new H.Suite('verify_run');
 const C = H.loadSim();
-const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA;
+const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA, Gen = C.Gen;
 
 /* ============================================================ 1. seeding */
 {
@@ -35,6 +35,26 @@ const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA;
     RunLogic.deriveEnemySeed(99) !== RunLogic.deriveBossSeed(99));
   s.ok('enemy seed is never the level seed itself',
     RunLogic.deriveEnemySeed(99) !== 99);
+
+  // room-checkpoint-structure spec: deriveRoomSeed needs the same L4
+  // determinism + divergence proof every other derived seed in this file
+  // already gets, plus distinctness from the OTHER three derivations at
+  // the same levelSeed — a real regression this file's own header names as
+  // the whole reason mix32 exists (four functions sharing one bare-XOR
+  // shape once collided for real).
+  s.eq('same level+room -> same room seed (L4)',
+    RunLogic.deriveRoomSeed(42, 0), RunLogic.deriveRoomSeed(42, 0));
+  s.ok('different room indices diverge',
+    RunLogic.deriveRoomSeed(42, 0) !== RunLogic.deriveRoomSeed(42, 1));
+  s.ok('different level seeds diverge at the same room index',
+    RunLogic.deriveRoomSeed(42, 0) !== RunLogic.deriveRoomSeed(43, 0));
+  s.ok('a room seed is never the zero sentinel', RunLogic.deriveRoomSeed(0, 0) !== 0);
+  s.ok('room 0\'s seed differs from the level\'s own enemy seed at the same levelSeed',
+    RunLogic.deriveRoomSeed(99, 0) !== RunLogic.deriveEnemySeed(99));
+  s.ok('room 0\'s seed differs from the level\'s own boss seed at the same levelSeed',
+    RunLogic.deriveRoomSeed(99, 0) !== RunLogic.deriveBossSeed(99));
+  s.ok('a room seed is never the level seed itself',
+    RunLogic.deriveRoomSeed(99, 0) !== 99);
 }
 
 /* ================================================================ 2. Run */
@@ -46,6 +66,7 @@ const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA;
   s.eq('currency starts at zero', r.currency, 0);
   s.eq('runsCompleted starts at zero', r.runsCompleted, 0);
   s.eq('kills starts at zero', r.kills, 0);
+  s.eq('roomIndex starts at zero', r.roomIndex, 0);
 
   s.eq('a zero seed still produces a real, non-zero runSeed', new Run(0).runSeed !== 0, true);
 }
@@ -133,12 +154,79 @@ const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA;
  * pure logic above in correctly, not just that the logic is self-consistent.
  * ============================================================================= */
 
-// Kills a target through the REAL damage path (Combat.resolveBox), not a
-// direct .hp poke — targetDown, which run.kills is subscribed to, only ever
-// fires from there (40-combat.js), never from Enemy.prototype.hurt() itself.
-function realKill(a, target) {
-  const hb = { x: target.body.x, y: target.body.y, w: target.body.w, h: target.body.h };
-  C.Combat.resolveBox(a.p(), hb, a.sim.targets, { damage: 99999, knock: [0, 0], facing: 1 }, a.sim.bus);
+// realKill(target)/clearRoomAndAdvance() now live on the scenario() api
+// itself (tests/harness.js) — promoted from what used to be independently
+// maintained, byte-identical copies here and in verify_meta.js.
+
+{
+  // Adversarially found and fixed — TWICE, the second time by this exact
+  // test catching what the first fix missed, not assumed safe just because
+  // it fixed the first, real, reproduced failure mode:
+  //
+  // (1) An earlier version of Sim.prototype._buildCheckpointAlcove()
+  //     stamped every column in its requested range SOLID unconditionally,
+  //     including columns belonging to some OTHER platform at a different
+  //     row — turning that platform's own column into a ceiling directly
+  //     above it. Blocked the one real incoming jump path D3a's own
+  //     fairness audit had already proven legal, in roughly a third of
+  //     rooms fuzzed.
+  // (2) Protecting only a lower platform's own literal column was NOT
+  //     enough: a rising jump drifts sideways WHILE still climbing, so it
+  //     can clip a new ceiling several real tiles beyond that platform's
+  //     own edge, well past where the first fix stopped stamping — this
+  //     test's own first version (comparing against a hardcoded `0`
+  //     blocked, not a real pre-alcove baseline) caught 17/150 rooms still
+  //     newly broken by the alcove even after fix (1) landed.
+  //
+  // clearRoomAndAdvance() (tests/harness.js) cannot catch either — it
+  // TELEPORTS to the exit rather than physically jumping there — so this
+  // reuses H.attemptHop() (the SAME real, multi-strategy physics prover
+  // verify_gen.js's own "strongest claim in the file" already trusts,
+  // promoted to tests/harness.js specifically so this could reuse it
+  // rather than fork an independently-tuned, weaker copy) to compare
+  // reachability WITH and WITHOUT the alcove stamped, for every real
+  // platform with a pre-alcove audited edge into the exit. Comparing
+  // against a real pre-alcove baseline, not a flat "always reachable"
+  // expectation, is deliberate: a handful of rooms are already unreachable
+  // by this prover even with NO alcove at all (a real, separate, out-of-
+  // scope limitation of comparing an isolated-pair capability model against
+  // a full room's real geometry — not this feature's own bug to fix). The
+  // claim this test actually needs to hold is narrower and exactly
+  // correct: the checkpoint alcove itself never NEWLY breaks a path that
+  // was reachable before it existed.
+  const N = 150;
+  let roomsChecked = 0, newlyBlocked = [];
+  for (let seed = 1; seed <= N; seed++) {
+    const gen = Gen.generate(seed, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS });
+    const exitIdx = gen.platforms.length - 1 - gen.pickups.length;
+    const edges = Gen.buildGraph(gen.platforms);
+    const approaches = [];
+    for (let i = 0; i < gen.platforms.length; i++) {
+      if (i !== exitIdx && edges[i].indexOf(exitIdx) !== -1) approaches.push(i);
+    }
+    if (!approaches.length) continue;   // exit only reached from spawn itself — out of scope here
+    roomsChecked++;
+    const exitPlatform = gen.platforms[exitIdx];
+    const successCheck = (b) => {
+      const dx = (b.x + b.w / 2) - gen.exit[0], dy = (b.y + b.h / 2) - gen.exit[1];
+      return (dx * dx + dy * dy) <= CFG.RUN_EXIT_RADIUS * CFG.RUN_EXIT_RADIUS;
+    };
+
+    const reachedBefore = approaches.some((fromIdx) =>
+      H.attemptHop(C, gen.platforms[fromIdx], exitPlatform, { world: gen.world, successCheck }));
+
+    const gen2 = Gen.generate(seed, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS });
+    const sim = new C.Sim({ world: gen2.world, seed, players: 1, spawns: [gen2.spawn] });
+    sim.tube = sim._buildCheckpointAlcove(gen2);   // the exact call _enterRoom() makes
+    const reachedAfter = approaches.some((fromIdx) =>
+      H.attemptHop(C, gen2.platforms[fromIdx], gen2.platforms[exitIdx], { world: gen2.world, successCheck }));
+
+    if (reachedBefore && !reachedAfter) newlyBlocked.push(seed);
+  }
+  s.ok('sampled a meaningful number of rooms with a real pre-alcove approach to the exit',
+    roomsChecked > 50, roomsChecked + '/' + N);
+  s.eq('the checkpoint alcove never newly blocks a real physics path that was reachable before it was stamped',
+    newlyBlocked.length, 0, newlyBlocked.slice(0, 10).join(','));
 }
 
 {
@@ -172,7 +260,7 @@ function realKill(a, target) {
   a.settle();
   a.sim.beginRun(12);
   const before = a.sim.run.levelSeed;
-  for (const t of a.sim.targets) realKill(a, t);
+  for (const t of a.sim.targets) a.realKill(t);
   a.step(1);
   s.eq('killing everything without reaching the exit does not enter the boss',
     a.sim.run.phase, 'level');
@@ -192,12 +280,17 @@ function realKill(a, target) {
   a.settle();
   a.sim.beginRun(17);
   a.sim.addTarget(new C.Combat.Dummy(100, a.b().x + 20, a.b().y, 40));
-  for (const t of a.sim.targets) { if (t.id !== 100) realKill(a, t); }
+  for (const t of a.sim.targets) { if (t.id !== 100) a.realKill(t); }
   s.eq('every real roster member is dead, only the dummy survives',
     a.sim.targets.filter((t) => t.alive()).length, 1);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  s.eq('the undying dummy never blocks the level from clearing', a.sim.run.phase, 'boss');
+  // room-checkpoint-structure spec: clearing ROOM 0 advances to room 1, not
+  // straight to the boss — a level is a chain now, not a single room. The
+  // dummy's own claim (never blocks a real clear) is proven the same way
+  // regardless: room advanced, still 'level' phase, not stuck in room 0.
+  s.eq('the undying dummy never blocks the room from clearing', a.sim.run.roomIndex, 1);
+  s.eq('advancing a room stays in the level phase, not the boss', a.sim.run.phase, 'level');
 }
 
 {
@@ -205,13 +298,20 @@ function realKill(a, target) {
   a.settle();
   a.sim.beginRun(13);
   s.eq('a fresh level starts with zero banked kills', a.sim.run.kills, 0);
+  // room-checkpoint-structure spec: clear every combat room but the last
+  // through the shared helper first — run.kills is level-scoped, not
+  // room-scoped (it only resets at a true level end), so kills already
+  // banked from the earlier rooms are still on the counter below.
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  const killsBefore = a.sim.run.kills;
   const targets = a.sim.targets.slice();
-  for (const t of targets) realKill(a, t);
-  s.eq('every real kill through Combat.resolveBox is banked', a.sim.run.kills, targets.length);
+  for (const t of targets) a.realKill(t);
+  s.eq('every real kill through Combat.resolveBox is banked',
+    a.sim.run.kills, killsBefore + targets.length);
 
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  s.eq('cleared AND at the exit enters the boss', a.sim.run.phase, 'boss');
+  s.eq('cleared AND at the exit of the FINAL room enters the boss', a.sim.run.phase, 'boss');
   s.eq('the arena replaces the generated level', a.sim.world.w, C.Boss.ARENA_W);
   s.eq('the exit no longer exists — a true fact about the arena, not a phase flag',
     a.sim.exit, null);
@@ -219,7 +319,7 @@ function realKill(a, target) {
   s.eq('current hp carries through the door — no free heal at the threshold',
     a.p().hp, a.p().maxHp);
   s.eq('boss kills are never double-counted into run.kills',
-    a.sim.run.kills, targets.length);
+    a.sim.run.kills, killsBefore + targets.length);
 }
 
 {
@@ -228,11 +328,12 @@ function realKill(a, target) {
   const a = H.scenario();
   a.settle();
   a.sim.beginRun(14);
-  for (const t of a.sim.targets) realKill(a, t);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  for (const t of a.sim.targets) a.realKill(t);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
   const oldLevelSeed = a.sim.run.levelSeed;
-  realKill(a, a.sim.bossTarget);
+  a.realKill(a.sim.bossTarget);
   a.step(1);
   // No decrement happens on the trigger tick itself (the decrement-check
   // runs BEFORE the trigger this same tick, finds -1, skips) — the counter
@@ -264,7 +365,7 @@ function realKill(a, target) {
   // level are still paid out even though the level was never cleared, not
   // just that a full clear pays out (the boss-victory test above already
   // covers that case).
-  realKill(a, a.sim.targets[0]);
+  a.realKill(a.sim.targets[0]);
   a.p().hp = 1;
   a.p().hurt(1, a.sim.bus, [0, 0]);
   // Unlike the boss-victory case above, hurt() is called OUT OF BAND, before
@@ -325,10 +426,11 @@ function realKill(a, target) {
     const a = H.scenario({ seed });
     a.settle();
     a.sim.beginRun(seed);
-    for (const t of a.sim.targets) realKill(a, t);
+    a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+    for (const t of a.sim.targets) a.realKill(t);
     a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
     a.step(1);
-    realKill(a, a.sim.bossTarget);
+    a.realKill(a.sim.bossTarget);
     a.step(CFG.RESPAWN_FRAMES + 2);
     a.p().hp = 1;
     a.p().hurt(1, a.sim.bus, [0, 0]);
@@ -343,8 +445,12 @@ function realKill(a, target) {
   // Regression (adversarial pass): a STAGGERED co-op death — P0 dies, P1
   // dies independently a few ticks later, P0's own countdown finishes
   // FIRST and commits the level while P1 is still genuinely mid-death.
-  // _enterLevel()'s player-relocation must not stomp P1's still-running
+  // _enterRoom()'s player-relocation must not stomp P1's still-running
   // countdown just because a commit is landing for the run as a whole.
+  // The transition exercised below (clearing room 0 and reaching its own
+  // exit) advances to room 1, not the boss — any transition proves the
+  // same claim (a still-dead partner must never be relocated by one), so
+  // this does not need to walk the whole chain to the boss to be valid.
   const a = H.scenario({ players: 2 });
   a.settle();
   a.sim.beginRun(31);
@@ -370,10 +476,29 @@ function realKill(a, target) {
   // Immediately after the commit, walk p0 to the new level's exit while
   // p1 is STILL dead — the level->boss transition must not relocate p1
   // out of their own countdown either.
-  for (const t of a.sim.targets) realKill(a, t);
+  //
+  // Test-coverage gap (adversarial pass): this is also the one place in
+  // this file a real checkpoint fires while a co-op partner is genuinely
+  // dead — the exact case _healAtCheckpoint()'s `if (!p.alive()) continue;`
+  // guard exists for. Give p0 a real, distinct partial injury first so
+  // p0's own share of the heal is provably nonzero and separately
+  // checkable — p1's hp already reads exactly 0 from hurt() above, which
+  // would make a weaker "missing <= 0" skip reason look identical to the
+  // real "not alive" one; this tells the two apart.
+  p0.hp = p0.maxHp - 6;
+  let checkpointPayload = null;
+  a.sim.bus.on('checkpoint', (e) => { checkpointPayload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
   a.b(0).x = a.sim.exit[0]; a.b(0).y = a.sim.exit[1] - a.b(0).h;
   a.step(1);
-  s.eq('the still-dead p1 is untouched by the level->boss transition too', p1.state, 'dead');
+  s.eq('the still-dead p1 is untouched by a room-advance transition too', p1.state, 'dead');
+  s.ok('a checkpoint really did fire while p1 was still genuinely dead', !!checkpointPayload);
+  s.eq('the alive partner (p0) is healed for their own real share',
+    p0.hp, p0.maxHp - 6 + Math.ceil(6 * CFG.CHECKPOINT_HEAL_FRAC));
+  s.eq('checkpoint.healed reflects ONLY the alive partner\'s share, no phantom share for the dead one',
+    checkpointPayload.healed, Math.ceil(6 * CFG.CHECKPOINT_HEAL_FRAC));
+  s.eq('p1\'s hp is left exactly as hurt() set it — never touched by the heal despite "missing" almost all of it',
+    p1.hp, 0);
 
   // Let p1's own countdown finish out naturally.
   let n2 = 0;
@@ -426,7 +551,7 @@ function realKill(a, target) {
   a.sim.beginRun(80);
   const dummy = a.sim.addTarget(new C.Combat.Dummy(100, a.b().x + 20, a.b().y, 40));
   s.eq('kills start at zero even with a boot-path dummy present', a.sim.run.kills, 0);
-  realKill(a, dummy);
+  a.realKill(dummy);
   s.eq('killing the boot-path dummy through the real damage path never banks a kill',
     a.sim.run.kills, 0);
 }
@@ -445,13 +570,13 @@ function realKill(a, target) {
   a.sim.beginRun(90);
   const p0 = a.sim.players[0], p1 = a.sim.players[1];
   const targets = a.sim.targets.slice();
-  realKill(a, targets[0]);
+  a.realKill(targets[0]);
   p0.hp = 1; p0.hurt(1, a.sim.bus, [0, 0]);
   a.step(1);
   s.ok('a pending level end is in flight after the first death', !!a.sim._pendingLevel);
   s.ok('p1 is still alive and free to keep fighting the old, still-live level', p1.alive());
 
-  for (let i = 1; i < targets.length; i++) if (targets[i].alive()) realKill(a, targets[i]);
+  for (let i = 1; i < targets.length; i++) if (targets[i].alive()) a.realKill(targets[i]);
   s.eq('run.kills keeps counting every real kill landed during the pending window',
     a.sim.run.kills, targets.length);
 
@@ -499,14 +624,191 @@ function realKill(a, target) {
   a.p().gainStat('verdant', a.sim.bus);
   s.ok('grown past the baseline before the boss fight', a.p().stats.verdant > CFG.STAT_START);
 
-  for (const t of a.sim.targets) realKill(a, t);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  for (const t of a.sim.targets) a.realKill(t);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  realKill(a, a.sim.bossTarget);
+  a.realKill(a.sim.bossTarget);
   let n = 0;
   while (a.sim.run.phase !== 'level' && n < CFG.RESPAWN_FRAMES + 10) { a.step(1); n++; }
   s.eq('a boss victory with no death also resets stats at the boundary',
     a.p().stats.verdant, CFG.STAT_START);
+}
+
+{
+  // Test-coverage gap (adversarial pass): a room's roster clearing on the
+  // EXACT SAME tick a player dies must not fire a checkpoint at all —
+  // _stepRun()'s own room-clear block is gated on `!justDied`, the same
+  // "a fatal trade always wins" rule already documented above it for the
+  // boss-door check. A room lost to a death in the same tick is not saved.
+  const a = H.scenario({ players: 2 });
+  a.settle();
+  a.sim.beginRun(154);
+  const p0 = a.sim.players[0];
+  let fires = 0;
+  a.sim.bus.on('checkpoint', () => { fires++; });
+  const targets = a.sim.targets.slice();
+  for (let i = 0; i < targets.length - 1; i++) a.realKill(targets[i]);
+  p0.hp = 1; p0.hurt(1, a.sim.bus, [0, 0]);        // p0 dies...
+  a.realKill(targets[targets.length - 1]);          // ...the SAME tick the roster clears
+  a.step(1);
+  s.eq('a room clearing on the exact tick a player dies never fires a checkpoint',
+    fires, 0);
+  s.ok('the death itself is still real and in flight', !!a.sim._pendingLevel);
+
+  let n = 1;
+  while (p0.state === 'dead' && n < CFG.RESPAWN_FRAMES + 5) { a.step(1); n++; }
+  s.eq('no checkpoint fired at any point across the whole death/respawn sequence',
+    fires, 0);
+}
+
+/* =============================================================================
+ * 9. Test-coverage additions from this project's own adversarial-
+ * verification pass on the room/checkpoint/cinders feature (§5l again) —
+ * real, confirmed absences of coverage for already-correct behavior,
+ * distinct from the CRITICAL alcove-reachability bug already regression-
+ * tested in section 7 above: the heal math, the tube's own placement
+ * geometry, the ROOM_COUNT boundary, and the checkpoint event's own
+ * payload fields.
+ * ============================================================================= */
+
+{
+  // _healAtCheckpoint()'s own math: CFG.CHECKPOINT_HEAL_FRAC of the
+  // MISSING hp (not of maxHp), rounded up — and the checkpoint event's own
+  // `healed`/`roomIndex` fields must report the exact real numbers, not an
+  // approximation.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(400);
+  a.p().hp = a.p().maxHp - 7;   // an odd number specifically, to exercise the ceil()
+  let payload = null;
+  a.sim.bus.on('checkpoint', (e) => { payload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
+  a.step(1);
+  const expected = Math.ceil(7 * CFG.CHECKPOINT_HEAL_FRAC);
+  s.ok('the checkpoint fires the instant the roster clears, independent of the player ever reaching the exit',
+    !!payload);
+  s.eq('checkpoint.roomIndex names the room that was just cleared, not wherever the run ends up next',
+    payload.roomIndex, 0);
+  s.eq('checkpoint.healed matches ceil(missing * CHECKPOINT_HEAL_FRAC) exactly',
+    payload.healed, expected);
+  s.eq('the player actually received that exact heal, not just the event claiming it',
+    a.p().hp, a.p().maxHp - 7 + expected);
+}
+
+{
+  // A checkpoint reached at full health heals exactly nothing — a real
+  // fraction of MISSING hp, not a flat number wasted on a player who
+  // needed none of it.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(401);
+  let payload = null;
+  a.sim.bus.on('checkpoint', (e) => { payload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
+  a.step(1);
+  s.eq('a checkpoint reached at full health heals exactly nothing', payload.healed, 0);
+  s.eq('and never overheals past maxHp', a.p().hp, a.p().maxHp);
+}
+
+{
+  // _checkpointFired guards _onRoomClear() to once per room — the roster
+  // stays cleared for many ticks before the player happens to reach the
+  // exit, and it must not refire every one of them.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(402);
+  let fires = 0;
+  a.sim.bus.on('checkpoint', () => { fires++; });
+  for (const t of a.sim.targets) a.realKill(t);
+  a.step(20);   // room stays clear, far from the exit, for many real ticks
+  s.eq('the checkpoint fires exactly once per room clear, not once per tick it stays true',
+    fires, 1);
+}
+
+{
+  // Co-op: the checkpoint heals EVERY alive player, and the event's own
+  // `healed` total is the SUM across every partner's own share, not just
+  // whichever player happens to be checked first.
+  const a = H.scenario({ players: 2 });
+  a.settle();
+  a.sim.beginRun(403);
+  const p0 = a.sim.players[0], p1 = a.sim.players[1];
+  p0.hp = p0.maxHp - 10; p1.hp = p1.maxHp - 4;
+  let payload = null;
+  a.sim.bus.on('checkpoint', (e) => { payload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
+  a.step(1);
+  const e0 = Math.ceil(10 * CFG.CHECKPOINT_HEAL_FRAC), e1 = Math.ceil(4 * CFG.CHECKPOINT_HEAL_FRAC);
+  s.eq('p0 is healed by its own real share', p0.hp, p0.maxHp - 10 + e0);
+  s.eq('p1 is healed by its own real share too', p1.hp, p1.maxHp - 4 + e1);
+  s.eq('checkpoint.healed is the SUM across both partners, not just one',
+    payload.healed, e0 + e1);
+}
+
+{
+  // ROOM_COUNT boundary: the chain advances room-by-room (checked at every
+  // step, not skipped straight to the end the way other tests in this file
+  // convenience-jump via clearRoomAndAdvance(ROOM_COUNT-1)), and
+  // clearing+exiting the LAST combat room enters the boss — never a room
+  // CFG.ROOM_COUNT that doesn't exist.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(404);
+  s.eq('starts at room 0', a.sim.run.roomIndex, 0);
+  for (let expected = 1; expected < CFG.ROOM_COUNT; expected++) {
+    a.clearRoomAndAdvance(1);
+    s.eq('advances to room ' + expected + ' exactly', a.sim.run.roomIndex, expected);
+    s.eq('still the level phase — the last combat room is not the boss itself',
+      a.sim.run.phase, 'level');
+  }
+  for (const t of a.sim.targets) a.realKill(t);
+  a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
+  a.step(1);
+  s.eq('clearing+exiting the FINAL combat room enters the boss, never a room CFG.ROOM_COUNT',
+    a.sim.run.phase, 'boss');
+}
+
+{
+  // The tube's own placement geometry (decision 3, room-checkpoint-
+  // structure spec): its own interact radius must never overlap the
+  // exit's own advance-trigger radius — a static claim about the two CFG
+  // constants themselves, not seed-dependent.
+  s.ok('TUBE_OFFSET_X leaves real clearance between the tube\'s own interact radius and the exit\'s advance radius',
+    CFG.TUBE_OFFSET_X - CFG.TUBE_INTERACT_RADIUS >= CFG.RUN_EXIT_RADIUS,
+    CFG.TUBE_OFFSET_X + '/' + CFG.TUBE_INTERACT_RADIUS + '/' + CFG.RUN_EXIT_RADIUS);
+
+  // And per-room: _buildCheckpointAlcove() always returns a tube level with
+  // the exit and within the real widened stamped run — by construction
+  // (the fallback branch, taken whenever neither side has a full
+  // TUBE_OFFSET_X of room, clamps to whichever edge of the stamped run is
+  // furthest from the exit, never past it).
+  let sampled = 0, fullOffset = 0;
+  for (let seed = 500; seed < 530; seed++) {
+    const gen = Gen.generate(seed, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS });
+    const sim = new C.Sim({ world: gen.world, seed, players: 1, spawns: [gen.spawn] });
+    const tube = sim._buildCheckpointAlcove(gen);
+    sampled++;
+    s.eq('the tube sits level with the exit (same y)', tube[1], gen.exit[1]);
+    const exitTileX = Math.round(gen.exit[0] / CFG.TILE);
+    const half = Math.floor(CFG.CHECKPOINT_ALCOVE_TILES / 2);
+    const minXTile = Math.max(1, exitTileX - half), maxXTile = Math.min(gen.world.w - 2, exitTileX + half);
+    s.ok('the tube never lands outside the widened stamped run',
+      tube[0] >= minXTile * CFG.TILE && tube[0] <= maxXTile * CFG.TILE,
+      'seed ' + seed + ': ' + tube[0] + ' not in [' + (minXTile * CFG.TILE) + ',' + (maxXTile * CFG.TILE) + ']');
+    if (Math.abs(tube[0] - gen.exit[0]) === CFG.TUBE_OFFSET_X) fullOffset++;
+  }
+  // Named honestly rather than assumed: at CHECKPOINT_ALCOVE_TILES/
+  // CLIMB_CLEARANCE_TILES's real current values, the CLAMPED fallback
+  // placement is actually the COMMON case at these room dimensions, not a
+  // rare edge one — measured at 9/30 (30%) full-offset placements across
+  // this sample when this test was written. That is a real, acceptable
+  // characteristic of the current tuning (the tube is still always safely
+  // placed within the stamped run, proven above), not a bug to chase; the
+  // only claim actually load-bearing here is that the ideal branch is
+  // real, reachable code, not dead weight.
+  s.ok('the full, ideal offset is real, reachable placement code, not dead code',
+    fullOffset > 0, fullOffset + '/' + sampled);
 }
 
 {

@@ -249,6 +249,34 @@ function scenario(spec = {}) {
     },
     tap(btn, i = 0) { return api.pressFor(btn, 1, i); },
 
+    // Kills a real target through the actual damage path (Combat.resolveBox),
+    // never by poking .hp directly (L8) — promoted here from what used to be
+    // two independently-maintained, byte-identical copies in verify_run.js
+    // and verify_meta.js (a real "one sibling patched, others missed" gap
+    // this project has already been burned by once; one shared copy now).
+    realKill(target, i = 0) {
+      const hb = { x: target.body.x, y: target.body.y, w: target.body.w, h: target.body.h };
+      C.Combat.resolveBox(api.p(i), hb, sim.targets, { damage: 99999, knock: [0, 0], facing: 1 }, sim.bus);
+      return api;
+    },
+
+    // room-checkpoint-structure spec: kills the current room's own roster
+    // through the real damage path, walks to sim.exit, and steps once —
+    // the exact "kill everything, walk to the door" sequence every existing
+    // beginRun()-driven test already used when a level was a single room,
+    // now repeated CFG.ROOM_COUNT (or `n`, if a test wants to stop partway
+    // through the chain) times. Reads CFG.ROOM_COUNT rather than a
+    // hardcoded 3, so this stays correct if that constant ever changes.
+    clearRoomAndAdvance(n, i = 0) {
+      if (n === undefined) n = C.CFG.ROOM_COUNT;
+      for (let r = 0; r < n; r++) {
+        for (const t of sim.targets.slice()) api.realKill(t, i);
+        api.b(i).x = sim.exit[0]; api.b(i).y = sim.exit[1] - api.b(i).h;
+        api.step(1);
+      }
+      return api;
+    },
+
     // Run until the body is standing, so a test can start from a known rest
     // rather than from whatever the spawn happened to be.
     settle(max = 60) {
@@ -347,9 +375,210 @@ function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
 function round(v) { return typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
 function fmt(v) { return typeof v === 'string' ? JSON.stringify(v) : String(round(v)); }
 
+/* ---------------------------------------------------- the physics prover
+ * Promoted here from verify_gen.js (originally the strongest claim in that
+ * file alone — every edge a generation candidate's own graph model calls
+ * legal, attempted by a REAL player through REAL sim ticks) so a second,
+ * unrelated caller (verify_run.js's checkpoint-alcove regression) can reuse
+ * this same hard-won, multi-strategy driving logic against a REAL,
+ * already-built room world instead of only an isolated two-platform one —
+ * rather than forking a second, independently-tuned copy of this delicate
+ * logic, the exact "one sibling patched, others missed" risk this project
+ * has already named elsewhere. verify_gen.js's own file is a runnable
+ * script (ends in a bare `process.exit(s.done())`), so these could not
+ * live there and still be safely `require()`-able from a second test file
+ * without that exit running as a side effect of the import — hence the
+ * move to this already-side-effect-free shared module instead.
+ *
+ * Landing precisely on a specific nearby platform via momentum-based
+ * platforming has no single universal "correct" input timing — a real
+ * player has more than one workable technique for the same hop (release
+ * early and coast, release late right at the target, hold the full natural
+ * arc and let distance do the work, or a genuine short tap for a small gap
+ * that doesn't need real height), and which one actually lands depends on
+ * the exact geometry. Chasing one universally-correct formula was the
+ * wrong problem — an edge-release version confirmed 164/174 real generated
+ * edges, switching to a center-release version regressed to 151/174
+ * (fixed some overshoots, broke others the edge timing had gotten right).
+ * The claim this exists to check is narrower and easier: does THERE EXIST
+ * a real technique that lands this hop — not does one specific heuristic
+ * happen to. So it tries a small set of genuinely distinct strategies and
+ * calls the edge confirmed if ANY of them lands. */
+const HOP_STRATEGIES = ['edge', 'center', 'hold-full', 'short-edge', 'short-center'];
+
+// `C`: a loaded sim module (H.loadSim()'s own return value) — passed
+// explicitly rather than assumed as a fixed module-level binding, since
+// different test files each call loadSim() independently.
+//
+// `opts` is optional and additive. Omitted (every isolated-pair caller):
+// builds its own fresh two-platform world from nothing but `from`/`to`'s
+// own coordinates, exactly as this function has always done, and requires
+// landing ON the `to` platform's own surface. `opts.world` (a real,
+// already-built World — e.g. a real generated room, post any further
+// stamping): drives the real platform records' own real coordinates
+// directly against it instead. `opts.successCheck(body, tick)`: checked
+// every real tick regardless of onGround, for a caller proving reachability
+// against a point + radius (RunLogic.reachedExit's own shape) rather than
+// "landed on this specific platform."
+function attemptHop(C, from, to, opts) {
+  const dir = to.x1 < from.x0 ? -1 : (to.x0 > from.x1 ? 1 : 0);
+  if (dir === 0) return null;   // zero-gap / overlapping-in-x: out of scope, see above
+
+  for (const strategy of HOP_STRATEGIES) {
+    if (attemptHopWith(C, from, to, dir, strategy, opts)) return true;
+  }
+  return false;
+}
+
+function attemptHopWith(C, from, to, dir, strategy, opts) {
+  opts = opts || {};
+  const CFG = C.CFG, World = C.World, TILE = C.World.TILE;
+  let world, ox, oy;
+  if (opts.world) {
+    world = opts.world; ox = 0; oy = 0;
+  } else {
+    const minX = Math.min(from.x0, to.x0) - 4, maxX = Math.max(from.x1, to.x1) + 4;
+    const minY = Math.min(from.y, to.y) - 12, maxY = Math.max(from.y, to.y) + 4;
+    world = new World(maxX - minX + 1, maxY - minY + 1);
+    ox = -minX; oy = -minY;
+    for (let x = from.x0; x <= from.x1; x++) world.set(x + ox, from.y + oy, TILE.SOLID);
+    for (let x = to.x0; x <= to.x1; x++) world.set(x + ox, to.y + oy, TILE.SOLID);
+  }
+
+  const startX = dir > 0 ? (from.x0 + ox) * CFG.TILE + 2 : (from.x1 + ox + 1) * CFG.TILE - CFG.PLAYER_W - 2;
+  const sim = new C.Sim({
+    seed: 7, world, players: 1,
+    spawns: [[startX, (from.y + oy) * CFG.TILE - CFG.PLAYER_H]]
+  });
+  sim.resetTransient();
+  const pad2 = sim.pads.get(0);
+  const rise = from.y - to.y;
+  const needsDouble = rise >= 3;
+  const edgeX = dir > 0 ? (from.x1 + ox + 1) * CFG.TILE : (from.x0 + ox) * CFG.TILE;
+  const targetY = (to.y + oy) * CFG.TILE - CFG.PLAYER_H;
+  const targetX0 = (to.x0 + ox) * CFG.TILE, targetX1 = (to.x1 + ox + 1) * CFG.TILE;
+  const isShort = strategy === 'short-edge' || strategy === 'short-center';
+  const targetAim = (strategy === 'center' || strategy === 'short-center') ? (targetX0 + targetX1) / 2 : targetX0;
+
+  // Every non-zero gap is crossed by jumping, including flat/descending
+  // ones — that's what the flat/drop gap ceiling itself measures (a running
+  // jump, not a no-jump walk-off). But holding jump to full natural apex,
+  // right for a gap AT that ceiling, is needless overkill for a SMALL gap
+  // well under it: traced directly on a trivial 1-tile drop onto a nearby
+  // spur (rise -1, well inside the flat ceiling), a full-apex hold produced
+  // an arc so long that the character's x position sailed clean past the
+  // entire narrow target before its y ever came back down to landing
+  // height. Real players modulate jump duration to the gap they're actually
+  // crossing (that's what this game's own JUMP_CUT mechanic is FOR) — the
+  // 'short-*' strategies below are a real, short tap-and-release rather
+  // than a held-to-apex jump, for exactly the small-gap cases a full hold
+  // overshoots. Only meaningful where no real height is needed (rise <= 0,
+  // and not a double-jump climb); for a genuine climb the short strategies
+  // just fall through to the same technique as their non-short counterpart.
+  const useShortHop = isShort && rise <= 0;
+
+  let launched = false, releasedForEdge = false, doubleJumped = false, dirReleased = false;
+  let shortHopReleased = false;
+  for (let t = 0; t < 500; t++) {
+    const b = sim.players[0].body;
+    /* 'hold-full' never releases direction at all — the original
+     * "maximize distance" technique, right for wide targets and gaps near
+     * the measured ceiling. The other strategies ease off once launched is
+     * done, letting AIR_FRICTION help precision on a narrow target —
+     * holding direction unconditionally for the ENTIRE flight, even past
+     * the target, consistently overshot narrow (2-3 tile) close targets
+     * regardless of correct jump timing, because horizontal momentum is
+     * entirely decoupled from jump state in this game's physics and
+     * nothing was asking the character to slow down. */
+    if (strategy === 'hold-full' || !dirReleased) pad2.set(dir > 0 ? 'right' : 'left', true);
+
+    if (!launched) {
+      const atEdge = dir > 0 ? (b.x + b.w >= edgeX - 4) : (b.x <= edgeX + 4);
+      if (atEdge) { pad2.set('jump', true); launched = true; }
+    } else if (useShortHop) {
+      // A genuine tap: release on the very next tick after the press,
+      // regardless of height or position — the short arc this produces is
+      // the whole point, not a side effect to gate away. Direction still
+      // eases off once past the aim point (height is trivially irrelevant
+      // here since useShortHop only applies at rise <= 0) — without this,
+      // direction would stay held for the entire flight and reintroduce the
+      // same overshoot risk on a narrow target, just with a shorter arc.
+      if (!shortHopReleased) { pad2.set('jump', false); shortHopReleased = true; }
+      if (!dirReleased) {
+        const bodyLead = dir > 0 ? b.x + b.w : b.x;
+        const overAim = dir > 0 ? (bodyLead >= targetAim) : (bodyLead <= targetAim);
+        if (overAim) dirReleased = true;
+      }
+    } else if (needsDouble && !doubleJumped && b.y > targetY && b.vy >= 0 && !releasedForEdge) {
+      // Jump 1 has reached its own natural apex AND the target height still
+      // isn't reached — both conditions matter. A tight (gap 1) climb can
+      // clip the SIDE of the target platform on the way up: traced directly,
+      // the body slides pinned against that wall (onWall) for many ticks
+      // while still rising, and by the time it finally clears the top edge
+      // it has already arrived at the exact needed height — for free, via
+      // the wall-slide, no second jump required. The original height-blind
+      // version pressed jump 2 anyway purely because apex (`vy >= 0`) had
+      // been reached, launching a needless second arc that overshot the
+      // target badly (rose far past it, landed nowhere near). Gating on
+      // `b.y > targetY` skips jump 2 whenever jump 1 already got there.
+      pad2.set('jump', false); releasedForEdge = true;
+    } else if (needsDouble && releasedForEdge && !doubleJumped) {
+      pad2.set('jump', true); doubleJumped = true;
+    } else if (strategy === 'hold-full') {
+      pad2.set('jump', true);   // hold continuously — JUMP_CUT never applies
+    } else if (!dirReleased) {
+      /* Release once past the aim point AND the needed height has actually
+       * been reached — releasing on x-position alone was a real bug in an
+       * earlier version: JUMP_CUT applies whenever jump is released WHILE
+       * STILL RISING, with no regard for whether the x-check happened to
+       * pass early. For a target well above the takeoff platform, the
+       * horizontal position can drift into the target's x range LONG
+       * before the climb is actually complete — releasing right then cuts
+       * the ascent short and the character falls into the gap it was
+       * trying to clear, never having reached the ledge at all. Gating on
+       * `b.y <= targetY` first guarantees the full climb happens before
+       * any release is considered; once past the apex, JUMP_CUT is a
+       * no-op regardless (its own condition requires vy < 0), so a "late"
+       * release is always safe. */
+      const heightReached = b.y <= targetY;
+      const bodyLead = dir > 0 ? b.x + b.w : b.x;
+      const overAim = dir > 0 ? (bodyLead >= targetAim) : (bodyLead <= targetAim);
+      if (heightReached && overAim) { pad2.set('jump', false); dirReleased = true; }
+      else { pad2.set('jump', true); }
+    } else {
+      // A ONE-WAY LATCH. Re-setting jump back to true whenever the
+      // character fell back below the target height after an earlier
+      // release toggles pad.next.jump false-then-true again — a genuine
+      // fresh PRESS EDGE from the sim's own perspective — and if the double
+      // jump was never spent, that "hold again" accidentally CONSUMES it,
+      // launching the character on an uncontrolled extra arc (measured
+      // directly once: it flew clean off this isolation world's far
+      // boundary wall). Once released, stay released for the rest of the
+      // attempt.
+      pad2.set('jump', false);
+    }
+
+    sim.step();
+    // opts.successCheck, when given, is checked every tick regardless of
+    // onGround — a caller proving real-world reachability against a point
+    // + radius (RunLogic.reachedExit's own shape) rather than "landed on
+    // this specific platform" doesn't need to be grounded to count; the
+    // default landing-precision check below is unchanged for every
+    // existing call site, none of which pass opts.
+    if (opts.successCheck) {
+      if (opts.successCheck(b, t)) return true;
+    }
+    else if (launched && b.onGround && t > 5) {
+      return b.x + b.w > targetX0 && b.x < targetX1 && Math.abs(b.y - targetY) < 2;
+    }
+  }
+  return false;
+}
+
 module.exports = {
   ROOT, SRC, SIM_FILES, VIEW_FILES, APP_FILES,
   readSrc, loadSim, loadWithView, loadPlatform, loadNarrative, loadAudio, stubCanvas,
   flatWorld, ledgeWorld, FLOOR_Y, REST_Y,
-  scenario, Suite
+  scenario, Suite,
+  HOP_STRATEGIES, attemptHop, attemptHopWith
 };

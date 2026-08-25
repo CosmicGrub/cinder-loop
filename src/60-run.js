@@ -75,6 +75,11 @@ function Run(seed) {
   this.currency = 0;            // D8's thin stub — 65-meta.js's real economy hangs off this later
   this.runsCompleted = 0;
   this.kills = 0;               // regular (non-boss) kills banked toward THIS run's payout
+  // room-checkpoint-structure spec: which combat room (0..CFG.ROOM_COUNT-1)
+  // is currently loaded within the current level. Set by Sim the moment a
+  // room actually loads, the same "levelSeed's own comment" precedent right
+  // above — never advanced here, this field only ever records what Sim did.
+  this.roomIndex = 0;
 }
 
 /* ---------------------------------------------------------------- seeding
@@ -135,6 +140,18 @@ function deriveEnemySeed(levelSeed) {
 // though only one of the two is ever alive at a time. 0x424F5353 = "BOSS".
 function deriveBossSeed(levelSeed) {
   return (mix32(levelSeed ^ 0x424F5353) >>> 0) || 1;
+}
+// Same idea again, for a combat room's own geometry seed — distinct from
+// both deriveEnemySeed's and deriveBossSeed's own salts so a level's three
+// rooms, its regular enemy-placement stream, and its boss never draw from
+// the same derived value even though `roomIndex` and levelSeed alone would
+// otherwise collide with deriveEnemySeed's own single-salt shape. Folds
+// `roomIndex` in the same "+1, times a real odd multiplicative constant"
+// shape deriveLevelSeed already uses for levelIndex — not a bare XOR, per
+// this file's own header on why that already caused one real collision
+// bug. 0x524F4F4D = "ROOM".
+function deriveRoomSeed(levelSeed, roomIndex) {
+  return (mix32(levelSeed ^ (((roomIndex + 1) * 2654435761) ^ 0x524F4F4D)) >>> 0) || 1;
 }
 
 /* --------------------------------------------------------------- "clear"
@@ -223,6 +240,7 @@ C.RunLogic = {
   nextRunSeed: nextRunSeed,
   deriveEnemySeed: deriveEnemySeed,
   deriveBossSeed: deriveBossSeed,
+  deriveRoomSeed: deriveRoomSeed,
   isLevelClear: isLevelClear,
   reachedExit: reachedExit,
   currencyEarned: currencyEarned,

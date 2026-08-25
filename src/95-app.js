@@ -258,7 +258,7 @@ function boot(canvas, hud, seed) {
   // forever — a real bug an earlier draft of this exact change had, caught
   // by driving it end to end in a real browser rather than assumed safe.
   // NOT actually permanent, though, an earlier version of this comment's
-  // own overclaim, caught adversarially: both _enterLevel() and
+  // own overclaim, caught adversarially: both _enterRoom() and
   // _enterBoss() unconditionally clear this.targets on every transition,
   // this dummy included, and nothing ever re-adds it — it survives only
   // until the player walks through the very first exit. Left as-is rather

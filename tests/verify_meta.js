@@ -203,10 +203,9 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
  * pure logic above in correctly, not just that the logic is self-consistent.
  * ============================================================================= */
 
-function realKill(a, target) {
-  const hb = { x: target.body.x, y: target.body.y, w: target.body.w, h: target.body.h };
-  C.Combat.resolveBox(a.p(), hb, a.sim.targets, { damage: 99999, knock: [0, 0], facing: 1 }, a.sim.bus);
-}
+// realKill(target)/clearRoomAndAdvance() now live on the scenario() api
+// itself (tests/harness.js) — promoted from what used to be independently
+// maintained, byte-identical copies here and in verify_run.js.
 
 {
   const a = H.scenario();
@@ -415,7 +414,7 @@ function realKill(a, target) {
     a.sim.beginRun(seed);
     a.sim.meta.enforceLocks = true;
     for (const t of a.sim.targets) {
-      realKill(a, t);
+      a.realKill(t);
       if (a.p().carriedBlueprint) { found = { a, id: a.p().carriedBlueprint }; break; }
     }
   }
@@ -436,7 +435,7 @@ function realKill(a, target) {
     a.sim.beginRun(seed);
     a.sim.meta.enforceLocks = true;
     for (const t of a.sim.targets) {
-      realKill(a, t);
+      a.realKill(t);
       if (a.p().carriedBlueprint) { found = { a, first: a.p().carriedBlueprint }; break; }
     }
   }
@@ -446,7 +445,7 @@ function realKill(a, target) {
     for (let i = 0; i < 10; i++) {
       const d = found.a.sim.addTarget(new C.Combat.Dummy(500 + i, found.a.b().x, found.a.b().y, 10));
       found.a.sim._levelRosterIds.push(d.id);
-      realKill(found.a, d);
+      found.a.realKill(d);
     }
     s.eq('the carried blueprint never changes once carrying, capacity respected',
       found.a.p().carriedBlueprint, found.first);
@@ -461,7 +460,7 @@ function realKill(a, target) {
   const a = H.scenario();
   a.settle();
   a.sim.beginRun(30);
-  for (const t of a.sim.targets) realKill(a, t);
+  for (const t of a.sim.targets) a.realKill(t);
   s.eq('Stage 1 default: a real clear never drops a blueprint', a.p().carriedBlueprint, null);
 }
 
@@ -498,6 +497,18 @@ function realKill(a, target) {
   const a = H.scenario();
   a.settle();
   a.sim.beginRun(32);
+  // room-checkpoint-structure spec: clear every room but the last BEFORE
+  // enforceLocks/currency/the carried blueprint are ever set — with
+  // enforceLocks already true, the real kills clearRoomAndAdvance() lands
+  // could themselves roll a REAL, random blueprint drop, which a
+  // checkpoint would then hand in on its own, contaminating this
+  // specifically-controlled scenario before it even starts (found by
+  // tracing a real, unexpected extra blueprintUnlocked event back to its
+  // source, not assumed safe). Stage 1's own default (enforceLocks false,
+  // nothing locked, nothing ever drops) keeps the room-clearing phase
+  // inert; enforceLocks only flips true once the controlled scenario
+  // itself begins.
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
   a.sim.meta.enforceLocks = true;
   // Comfortably affordable regardless of whatever this run's OWN real
   // kills/boss bonus also sweep into meta.currency before the spend runs
@@ -506,12 +517,12 @@ function realKill(a, target) {
   // computed below from the real roster size, not guessed.
   a.sim.meta.currency = 10000;
   a.p().carriedBlueprint = 'daggers';
-  const earned = RunLogic.currencyEarned(a.sim.targets.length, true);
+  const earned = RunLogic.currencyEarned(a.sim.run.kills + a.sim.targets.length, true);
 
-  for (const t of a.sim.targets) realKill(a, t);
+  for (const t of a.sim.targets) a.realKill(t);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  realKill(a, a.sim.bossTarget);
+  a.realKill(a.sim.bossTarget);
   let n = 0;
   while (a.sim.run.phase !== 'level' && n < CFG.RESPAWN_FRAMES + 10) { a.step(1); n++; }
 
@@ -531,28 +542,48 @@ function realKill(a, target) {
   const a = H.scenario();
   a.settle();
   a.sim.beginRun(33);
+  // room-checkpoint-structure spec: same clear-then-enable-locks-then-arm-
+  // the-carry ordering as the affordable case above, and for the identical
+  // reason — enforceLocks true during the room-clearing phase risks a
+  // REAL random blueprint drop the checkpoint would hand in on its own,
+  // and carrying the intended weapon before clearing would hand IT in at
+  // the first room too. Both contaminate this specifically-controlled
+  // scenario before it starts.
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
   a.sim.meta.enforceLocks = true;
   a.p().carriedBlueprint = 'warmaul';
-  // This run's own real kills/boss bonus ALSO sweep into meta.currency
-  // before the spend runs (same mechanism as the affordable case above) —
-  // computed from the real roster so the total stays genuinely short of
-  // the cost regardless of how many enemies this seed happens to place.
-  const earned = RunLogic.currencyEarned(a.sim.targets.length, true);
-  a.sim.meta.currency = Math.max(0, CFG.META_BLUEPRINT_UNLOCK_COST - 1 - earned);
-  const totalBeforeSpend = a.sim.meta.currency + earned;
+  // room-checkpoint-structure spec: the hand-in attempt below now fires at
+  // THIS room's own checkpoint (§7d — every room clear hands in, not just
+  // a true level end), which happens BEFORE _commitPendingLevel() ever
+  // sweeps this run's real kills/boss bonus into meta.currency (that sweep
+  // is _commitPendingLevel()'s own job, reached only once the boss is
+  // later defeated). So the affordability check the checkpoint actually
+  // makes reads meta.currency ALONE, with nothing yet earned — unlike the
+  // affordable-case test above (still correct on its own terms, since
+  // addition commutes: spend-then-earn and earn-then-spend land on the
+  // identical final total), an UNAFFORDABLE precondition only needs
+  // currency held below the cost at THIS moment, not "total minus earned."
+  a.sim.meta.currency = CFG.META_BLUEPRINT_UNLOCK_COST - 1;
+  const currencyBeforeSpend = a.sim.meta.currency;
   s.ok('this scenario genuinely cannot afford the unlock (test precondition)',
-    totalBeforeSpend < CFG.META_BLUEPRINT_UNLOCK_COST);
+    currencyBeforeSpend < CFG.META_BLUEPRINT_UNLOCK_COST);
 
-  for (const t of a.sim.targets) realKill(a, t);
+  for (const t of a.sim.targets) a.realKill(t);
+  const earned = RunLogic.currencyEarned(a.sim.run.kills, true);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  realKill(a, a.sim.bossTarget);
+  a.realKill(a.sim.bossTarget);
   let n = 0;
   while (a.sim.run.phase !== 'level' && n < CFG.RESPAWN_FRAMES + 10) { a.step(1); n++; }
 
   s.eq('an unaffordable hand-in does NOT unlock the weapon', a.sim.meta.unlocked.warmaul, undefined);
-  s.eq('the refused spend leaves currency exactly where the sweep-in left it (never negative, never charged)',
-    a.sim.meta.currency, totalBeforeSpend);
+  // The refused spend leaves currency untouched at the checkpoint — the
+  // LATER boss-defeat commit still unconditionally sweeps this run's real
+  // earnings in afterward (that sweep does not depend on whether a hand-in
+  // happened or succeeded), so the final total is the untouched pre-spend
+  // currency PLUS those real earnings, never charged for the refused spend.
+  s.eq('the refused spend leaves currency untouched; only real earnings land afterward',
+    a.sim.meta.currency, currencyBeforeSpend + earned);
   s.eq('no blueprintUnlocked event fired', a.count('blueprintUnlocked'), 0);
   s.eq('the carry slot is still cleared (consumed, not banked)', a.p().carriedBlueprint, null);
 }
@@ -564,10 +595,11 @@ function realKill(a, target) {
   const a = H.scenario();
   a.settle();
   a.sim.beginRun(34);
-  for (const t of a.sim.targets) realKill(a, t);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  for (const t of a.sim.targets) a.realKill(t);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  realKill(a, a.sim.bossTarget);
+  a.realKill(a.sim.bossTarget);
   let n = 0;
   while (a.sim.run.phase !== 'level' && n < CFG.RESPAWN_FRAMES + 10) { a.step(1); n++; }
   s.eq('meta.currency accumulates the same earnings run.currency does',
@@ -609,27 +641,47 @@ function realKill(a, target) {
   // Regression (adversarial pass): two SURVIVING co-op partners carrying a
   // blueprint for the SAME still-locked weapon at one commit. The second
   // carrier's spend is correctly a no-op (MetaLogic.isUnlocked() already
-  // true by the time their turn comes up in the loop) — but the runEnd
-  // event's own `handedIn` list must still report BOTH consumed carries,
-  // not just the one that also happened to spend currency. Both carry
-  // slots empty either way (the loop's own comment already commits to
-  // that for the unaffordable-spend case); the event payload has to say
-  // so for this case too.
+  // true by the time their turn comes up in the loop) — but the event's
+  // own `handedIn` list must still report BOTH consumed carries, not just
+  // the one that also happened to spend currency. Both carry slots empty
+  // either way (the loop's own comment already commits to that for the
+  // unaffordable-spend case); the event payload has to say so for this
+  // case too.
+  //
+  // room-checkpoint-structure spec: `_handInCarriedBlueprints()` is now
+  // shared between two call sites, and THIS scenario's own hand-in fires
+  // at the final combat room's own checkpoint (reached by the kill+exit
+  // walk below), not at the later runEnd — a checkpoint hands in at EVERY
+  // room clear now (§7d), and this test's clear+exit sequence IS one.
+  // Listening on 'checkpoint' rather than 'runEnd' proves the identical
+  // claim (both consumed carries reported in one event's payload) against
+  // whichever event is the one that actually carries it.
   const a = H.scenario({ players: 2 });
   a.settle();
   a.sim.beginRun(45);
+  const p0 = a.sim.players[0], p1 = a.sim.players[1];
+  // room-checkpoint-structure spec: clear every room but the last BEFORE
+  // enforceLocks or either carry slot are ever set — enforceLocks true
+  // during the room-clearing phase risks a REAL random blueprint drop the
+  // checkpoint would hand in on its own, and carrying either weapon any
+  // earlier would hand IT in at the first room-clear too. Both contaminate
+  // this specifically-controlled scenario before it starts.
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
   a.sim.meta.enforceLocks = true;
   a.sim.meta.currency = 10000;
-  const p0 = a.sim.players[0], p1 = a.sim.players[1];
   p0.carriedBlueprint = 'blade';
   p1.carriedBlueprint = 'blade';   // same weapon, two independent carriers
 
-  for (const t of a.sim.targets) realKill(a, t);
+  // Counting every fire (not a keep-first idiom) so this test can also
+  // catch a real double-fire regression of _onRoomClear() itself — a
+  // keep-first idiom would silently pass even if the checkpoint fired
+  // twice for this one room clear.
+  let checkpointFires = 0, handedInPayload = null;
+  a.sim.bus.on('checkpoint', (e) => { checkpointFires++; if (!handedInPayload) handedInPayload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
   a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
   a.step(1);
-  realKill(a, a.sim.bossTarget);
-  let handedInPayload = null;
-  a.sim.bus.on('runEnd', (e) => { handedInPayload = e; });
+  a.realKill(a.sim.bossTarget);
   let n = 0;
   while (a.sim.run.phase !== 'level' && n < CFG.RESPAWN_FRAMES + 10) { a.step(1); n++; }
 
@@ -637,7 +689,10 @@ function realKill(a, target) {
   s.eq('exactly one blueprintUnlocked event fires, not two', a.count('blueprintUnlocked'), 1);
   s.eq('both carry slots are empty in the new level', p0.carriedBlueprint, null);
   s.eq('for both players', p1.carriedBlueprint, null);
-  s.eq('runEnd.handedIn reports BOTH consumed carries, not just the one that spent currency',
+  s.ok('a checkpoint event actually fired to hand these in', !!handedInPayload);
+  s.eq('the checkpoint fires exactly once for this one room clear, not twice',
+    checkpointFires, 1);
+  s.eq('checkpoint.handedIn reports BOTH consumed carries, not just the one that spent currency',
     handedInPayload.handedIn.filter((id) => id === 'blade').length, 2);
 }
 
@@ -673,6 +728,15 @@ function realKill(a, target) {
   const altDc = H.scenario(); altDc.settle(); altDc.sim.beginRun(40);
   altDc.p().dashCharges = 1;
   s.ok('a differing dashCharges changes the hash', base.sim.hash() !== altDc.sim.hash());
+
+  // room-checkpoint-structure spec: run.roomIndex and the tube's own
+  // position are new per-room state — both must actually be walked by
+  // hash(), not silently excluded the way a naive extension could leave
+  // them (confirmed by the adversarial pass: both were real gaps before
+  // being added directly to hash() rather than just documented).
+  const altRoom = H.scenario(); altRoom.settle(); altRoom.sim.beginRun(40);
+  altRoom.clearRoomAndAdvance(1);
+  s.ok('a differing run.roomIndex changes the hash', base.sim.hash() !== altRoom.sim.hash());
 }
 
 {
@@ -684,10 +748,11 @@ function realKill(a, target) {
     a.sim.beginRun(seed);
     a.sim.meta.enforceLocks = true;
     a.sim.meta.currency = 50;
-    for (const t of a.sim.targets) realKill(a, t);
+    a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+    for (const t of a.sim.targets) a.realKill(t);
     a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
     a.step(1);
-    realKill(a, a.sim.bossTarget);
+    a.realKill(a.sim.bossTarget);
     a.step(CFG.RESPAWN_FRAMES + 2);
     return a.sim.hash();
   }
