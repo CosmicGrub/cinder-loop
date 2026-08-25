@@ -36,7 +36,7 @@ function fakeSim(overrides) {
 
 /* ============================================================ 1. content */
 {
-  const pools = ['levelStart', 'bossEntry', 'reveal', 'bossVictory', 'death'];
+  const pools = ['levelStart', 'checkpoint', 'bossEntry', 'reveal', 'bossVictory', 'death'];
   for (const p of pools) {
     s.ok('narrator pool "' + p + '" is non-empty', DIALOGUE.narrator[p] && DIALOGUE.narrator[p].length > 0);
     for (const line of DIALOGUE.narrator[p] || []) {
@@ -264,6 +264,27 @@ function fakeSim(overrides) {
   s.eq('and shows nothing', n.current, null);
 }
 
+/* ==================================================== 5b. checkpoint (D21) */
+{
+  const sim = fakeSim();
+  const n = new C.Narrative(sim, { seed: 1 });
+  sim.bus.emit('checkpoint', { roomIndex: 0, healed: 3, handedIn: [] });
+  s.ok('a real checkpoint fires a line from the matching pool',
+    n.current && DIALOGUE.narrator.checkpoint.indexOf(n.current.text) !== -1);
+  s.eq('and it is tagged as a narrator line, not a bark', n.current.kind, 'narrator');
+}
+
+{
+  // No payload branching for v1 (spec §5) — a checkpoint reached at full
+  // health (D14's own healed:0 case) fires the identical pool, not a
+  // different one.
+  const sim = fakeSim();
+  const n = new C.Narrative(sim, { seed: 1 });
+  sim.bus.emit('checkpoint', { roomIndex: 2, healed: 0, handedIn: ['blade'] });
+  s.ok('the pool fires identically regardless of healed/handedIn',
+    n.current && DIALOGUE.narrator.checkpoint.indexOf(n.current.text) !== -1);
+}
+
 /* ======================================================= 6. determinism (L4) */
 {
   function pickSequence(seed) {
@@ -292,6 +313,19 @@ function fakeSim(overrides) {
   s.eq('ttl counts down by real elapsed ms', n.current.ttl, ttl0 - 500);
   n.update(sim, 100000);
   s.eq('and expires to null once it runs out, not a negative-lingering value', n.current, null);
+}
+
+{
+  // Checkpoint fires through the exact same _show()/update() countdown
+  // path every other narrator line already uses — not a special case.
+  const sim = fakeSim();
+  const n = new C.Narrative(sim, { seed: 1 });
+  sim.bus.emit('checkpoint', { roomIndex: 0, healed: 1, handedIn: [] });
+  const ttl0 = n.current.ttl;
+  n.update(sim, 500);
+  s.eq('checkpoint ttl counts down by real elapsed ms too', n.current.ttl, ttl0 - 500);
+  n.update(sim, 100000);
+  s.eq('and expires the same way', n.current, null);
 }
 
 /* ============================================================ 8. wrap() */

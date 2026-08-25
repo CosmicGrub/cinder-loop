@@ -225,6 +225,20 @@ var DIALOGUE = {
       "This hallway remembers you, even on the days you don't remember it.",
       'Every ember that goes out finds its way back to the same fire.'
     ],
+    // D21: fires once per room clear (70-sim.js's own _onRoomClear()),
+    // independent of the player's own position or which room this is —
+    // calmer than bossEntry on purpose, a held breath rather than a
+    // warning. Double-voiced like every other narrator pool: "tempered"
+    // echoes death's own use of the word directly — first read, a small
+    // mercy; reread post-reveal, the Kilnkeeper naming its own shaping
+    // process out loud, the gentler twin of what death already confessed.
+    checkpoint: [
+      "Rest a moment. The shape holds better when it isn't rushed.",
+      'Something here mends what the fight took. I keep it stocked, for you.',
+      'Not every door needs walking through today. This one will wait.',
+      'Tempered a little more, and no dying required this time.',
+      'The fire banks low here, just enough to catch your breath by.'
+    ],
     bossEntry: [
       'This is the last room before the last room. It always is.',
       'Kilnwarden keeps the deepest heat. Go carefully, or go anyway.',
