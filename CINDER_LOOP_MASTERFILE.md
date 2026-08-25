@@ -278,6 +278,8 @@ measurement of the code that is actually on disk.
 | D11 | Story-related events (dialogue + sound) are one data-driven system, not two: a `DIALOGUE` table (D7 — content, not code) fires through the EXISTING typed Bus (`00-core.js`), the same pipe `telegraph`/`hit`/`targetDown` already use, and is rendered entirely presenter-side in a new `82-narrative.js` (L5 — chosen text has zero effect on sim state, so it costs nothing in `hash()`/determinism). Two pools: a recurring narrator voice (the Kilnkeeper) triggered at run milestones, and short per-template enemy ambient barks, both line-picked via a seeded RNG (L4). `85-audio.js`, still not built, is scoped to hang off the same trigger design rather than invent a second one later. | scoped 2026-08-15, following the same "scope it, then build it" discipline as every other D-series decision — nothing here is built yet |
 | D12 | The villain reveal: the Kilnkeeper — heard as an ambiguous guide throughout every run via D11's system — is revealed as the true antagonist at or during the final boss fight, which is or channels its true form; every line heard earlier rereads once the reveal lands. Depends on `60-run.js` (what "the final boss" and "a run milestone" even mean) and `55-boss.js`; scoped now, built once both exist. | gives the ongoing dialogue system and the ending the same payoff, rather than two disconnected features — build once, land twice |
 | D13 | Two new character-level abilities — Ember Dash (an airborne reuse of the existing Roll button/timing) and Parry (a new input that negates one hit and staggers its source) — plus four flat-cost meta-currency enhancements (`buyMaxHp`-shaped: Dash Extra Charge, Dash Extended I-Frames, Parry Riposte, Parry Reflect). Parry is implemented as a lightweight timed flag (`parryWindow`/`parryCd`) on `Player`, never its own committed state, and is deliberately excluded from `invulnerable()` — folding it into that state-gated shape would also grant free hazard immunity (lava, spikes) as a side effect, since `invulnerable()` gates both combat i-frames and hazard checks. The negate+stagger check is a direct call inside `Combat.resolveBox` (`40-combat.js`), the one shared chokepoint every hit already routes through, rather than a Bus listener — the fairness rule already guarantees any hit reaching that point is the result of an already-completed telegraph, so a timed window checked at resolution time is structurally sufficient with no new targeting/aim query needed. | resolved a real design fork surfaced independently by two planning passes over the same question (state vs. flag) with a concrete, traceable failure mode (hazard-immunity leakage) rather than a preference call; keeping the check inside the existing chokepoint avoids a second precedent for one live entity's event mutating another's state |
+| D14 | A level becomes a linear chain of `CFG.ROOM_COUNT` (3) procedurally-generated combat rooms plus the existing boss room — not a branching graph, not hand-authored combat content — reusing the exact mid-run teardown-and-reload shape `_enterLevel()`/`_enterBoss()` already established via a new `Sim.prototype._enterRoom(i)` called in a loop instead of once, each room independently fairness-audited by the same D3a machinery at smaller `CFG.ROOM_BEATS`/`ROOM_PICKUPS` dimensions and its own `RunLogic.deriveRoomSeed`-derived seed. A checkpoint fires the instant a room's roster clears (`_onRoomClear()`), deliberately decoupled from reaching the room's own exit — `_healAtCheckpoint()` (a fraction of MISSING hp, never a flat number) and `_handInCarriedBlueprints()` (a helper extracted out of `_commitPendingLevel()` so the SAME hand-in logic now fires at every checkpoint, not just true run-end) both land immediately, giving the player a real, player-paced window to act before the door itself unlocks. Death still ends the whole run exactly as D1 defines it — no mid-run "continue," a hybrid explicitly chosen over a bonfire/save-crystal model. Cinders (a second, riskier income stream into the same `meta.currency` pool, D8) are scoped and reserved for the mechanic's own follow-up — `CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` and three Bus events (`cinderDrop`/`cinderLost`/`cinderBanked`) exist, and the tube's own physical anchor point is real and reachability-audited (`_buildCheckpointAlcove()`) — but the drop/carry/bank mechanic itself (`player.carriedCinders`, a drop-on-kill roll, a bank-at-tube interaction) has no wired implementation yet; named honestly in §5q, not silently claimed complete. | rooms give a level real internal pacing (Dead Cells/Castlevania/Hollow Knight-style structure) without touching D1's own locked run-loop identity — reusing `_enterLevel()`'s existing shape was the single biggest risk-reducer available, over inventing new machinery; decoupling checkpoint-fires-on-clear from advance-fires-on-clear-AND-exit is what actually earns a real decision point rather than an invisible auto-save |
+| D15 | `player.weapon` goes live for the first time since v0.2.8. `Sim.prototype.switchWeapon(playerIndex, weaponId)` is the real primitive — validates `player.alive()`, `canSwitchWeapon()`, and `DATA.WEAPON_IDS` membership before consulting `MetaLogic.isUnlocked` — gated on `!player.attack`, a correctness requirement rather than a feel choice: `Combat.step` re-reads `player.weapon` every tick an attack resolves (`Combat.weaponScale`, `40-combat.js:302-313`), so a mid-swing switch would silently reweight an in-flight move's damage using the new weapon's stat-colour pair instead of the one the move actually belongs to. `Sim.prototype.cycleWeapon(playerIndex)` is the thin wrapper the one v1 input trigger (gamepad button 4 / `KeyI`) actually calls, consumed in a new phase 0 of `Sim.prototype.step` — before attack input, so a same-tick switch-then-swing combo correctly attacks with the newly-equipped weapon — in the SIM layer, not the presenter, matching every other action already consumed there. `meta.lastWeapon` is captured immediately inside `switchWeapon()` itself, on player 0's own explicit switch, deliberately NOT a run-end snapshot — reading the real reset-timing source found a run-end capture would need a second, `blueprintLost`-style timing hook to handle a player-0 death correctly, real avoidable complexity a capture-on-switch design sidesteps entirely. | this is the single largest already-built-but-inert surface in the game closing at once — D9's four weapons and D2's entire per-weapon colour-scaling axis have been dead build-diversity from a player's perspective since v0.2.8; gating on attack-state alone is both necessary and sufficient because `player.weapon` is read nowhere else, so no second, broader lock is needed |
 
 All remaining design answers take the ★ defaults recorded in the phased answer sheet.
 
@@ -1452,33 +1454,61 @@ the very first spawn; four flat-cost meta-currency enhancements, real
 and live-topping-up every currently-alive player on purchase; real
 gamepad and touch wiring for both, including a genuinely new touch
 Assist mode; VFX/SFX reacting to all of it through the same Bus-trigger
-design every prior presenter feature already established.
+design every prior presenter feature already established. **Since
+v0.2.18:** rooms and checkpoints (D14, §5q) — a level is a real chain of
+`CFG.ROOM_COUNT` combat rooms plus the boss room, each entered through a
+new `Sim.prototype._enterRoom(i)`; a checkpoint fires the instant a
+room's roster clears, independent of reaching the exit, and really heals
+(`_healAtCheckpoint`) and hands in carried blueprints
+(`_handInCarriedBlueprints`, now shared with true run-end) on the spot; a
+critical alcove-reachability bug that could make an audited-fair room's
+own exit physically unreachable was found and fixed in two rounds,
+verified across 150 seeds. **Since v0.2.19:** weapon equip and switch
+(D15, §5r) — `player.weapon` is finally live: `Sim.prototype.switchWeapon`
+is the real, validated primitive and `Sim.prototype.cycleWeapon` is the
+real input-facing wrapper a permanent gamepad-button-4/`KeyI` binding
+actually drives from a new phase 0 in `Sim.prototype.step`;
+`meta.lastWeapon` persists the starting-loadout choice, captured the
+instant player 0 switches.
 
 **Designed, not built:** two of D8's four named meta-currency purchases —
 flask charges and a backpack slot — real, open design space with no
 existing engine surface to build on, named and deliberately deferred
-rather than folded in quietly (§5m). Also not built: curses, grafts, the
-split/merge camera, and weapon
-equipping/switching (the weapon DATA and its stat scaling are both real
-and tested — §5g/§5h — but nothing yet changes `player.weapon` outside a
-test; it depends on D4's pickup/blueprint system, which now exists for
-the UNLOCK half — §5m — but still has no path from "unlocked" to
-"equipped," a separate, still-unbuilt mechanic). A Galaxy Watch6 Classic
+rather than folded in quietly (§5m). Also not built: curses, grafts, and
+the split/merge camera. A Galaxy Watch6 Classic
 companion status view (§5b) — not gameplay on the watch, a data view
 only, per the 2026-07-26 scoping decision. **Since v0.2.17 (D13, §5p):**
 a shop/hub UI for the four Dash/Parry enhancements — F7-F10 debug keys
 are the only way to trigger a purchase today, the identical "real,
 tested, reachable, but nothing yet gives the player a way to trigger it
-outside a debug key" shape D4/D8's own weapon-equip and +max HP
-purchases already have; a true continuous ember trail across the whole
-dash (a single burst at the start stands in — every particle effect in
-this codebase fires off one discrete Bus event, never a live
-per-render-frame emission, and that pattern does not exist yet); a third
-ability beyond Dash and Parry (a ranged/utility option and a
-locked-shortcut interact were both pitched during D13's own brainstorm
-and explicitly not chosen); weapon-specific or weapon-flavored ability
-variants (blocked on weapon equip/switch itself, D4's own still-open
-gap above, unchanged by this release).
+outside a debug key" shape D4/D8's own +max HP purchase already has; a
+true continuous ember trail across the whole dash (a single burst at the
+start stands in — every particle effect in this codebase fires off one
+discrete Bus event, never a live per-render-frame emission, and that
+pattern does not exist yet); a third ability beyond Dash and Parry (a
+ranged/utility option and a locked-shortcut interact were both pitched
+during D13's own brainstorm and explicitly not chosen). **Since v0.2.18
+(D14, §5q):** the cinders economy itself — `player.carriedCinders`, a
+drop-on-kill roll, and a bank-at-tube interaction — `CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` and the `cinderDrop`/`cinderLost`/
+`cinderBanked` Bus events are reserved but nothing yet emits them; the
+tube's own physical anchor point is real and reachability-audited, the
+interaction it exists to trigger is not. Also not built: the checkpoint's
+own narrative beat and SFX cue (spec §7c's other half — a new
+`DIALOGUE.narrator.checkpoint` pool and SFX table entry, wired the same
+way `levelStart`/`bossEntry` already are) and the save-and-quit resume
+point (spec §7b — a room-scoped persistence key `boot()` would restore
+into on reload); branching rooms (spec §11, explicitly deferred); a
+distinct hand-authored checkpoint room type (spec §5 described one — what
+shipped instead stamps the checkpoint alcove directly onto each combat
+room's own procedurally-generated exit platform, folding it into an
+existing room rather than introducing a fifth room type). **Since v0.2.19
+(D15, §5r):** no HUD indicator of the currently-equipped weapon
+(`80-view.js`); no touch-input wiring for `switchWeapon` (L13 defers
+this — desktop + gamepad first); no per-player independent "last weapon"
+memory (`meta.lastWeapon` is single and player-0-sourced, a named
+judgment, not an oversight); weapon-specific or weapon-flavored ability
+variants (blocked on weapon equip/switch existing at all — D15 clears
+that block, but the variants themselves are not built).
 
 **Scaffolding that must be deleted, not built on:** `demoLevel()` in
 `95-app.js` is retired from the primary boot path as of v0.2.6 (§5e) — boot
@@ -3324,6 +3354,340 @@ pitched during the brainstorming pass and explicitly not chosen. The
 its own follow-up, not fixed here, since it is demonstrably unrelated to
 D13's own code and fixing it would have meant auditing sections of
 `verify_render.js` this release never otherwise touched.
+
+---
+
+## 5q. Room/checkpoint/cinders structure — chained combat rooms, checkpoint healing, alcove-reachability bug fixed (v0.2.18, D14)
+
+**Locked from a real design spec, not built freehand.** The full shape —
+the room graph, what "clear" means per room, the checkpoint's four jobs,
+the cinders economy, and the one governing constraint everything else
+answers to — was written and approved in a dedicated spec
+(`docs/superpowers/specs/2026-08-23-room-checkpoint-structure-design.md`)
+before any implementation began, the same "scope it, then build it"
+discipline D10-D13 already used. That one governing constraint, named in
+the spec's own §2: death still ends the whole run exactly as D1 defines
+it. Rooms and checkpoints exist for pacing and structure *within* one
+run, not as a death-recovery mechanic — a Castlevania/Hollow Knight
+bonfire-resume-at-last-checkpoint model was considered and explicitly
+rejected in favor of keeping D1's own permadeath identity untouched. What
+shipped is a hybrid: real checkpoints, real room structure, real stakes
+at the room level, layered onto a run loop that is otherwise identical to
+D1's own spawn → clear → boss → die → spend → respawn.
+
+**A level is now a linear chain, reusing what already existed rather
+than inventing new machinery.** The single biggest risk-reducer in the
+design held up in practice: `Sim.prototype._enterLevel()`/`_enterBoss()`
+already tore down one `World` + enemy roster and loaded a fresh one
+mid-run — room-to-room transitions reuse that exact shape. A new
+`Sim.prototype._enterRoom(roomIndex, gen)` replaces the old
+`_enterLevel(gen, levelSeed)` entirely, called once per room
+(`CFG.ROOM_COUNT`, 3) before `_enterBoss()` takes over for the fourth.
+Each room is one `Gen.generate()` call bounded to `CFG.ROOM_BEATS`
+(6, versus a full level's 14) and `CFG.ROOM_PICKUPS` (2, versus 4) —
+independently fairness-audited by the *same* D3a machinery, no new
+rules, proven at these real smaller dimensions by a dedicated 50-seed
+coverage block in `verify_gen.js`. Per-room seeds come from a new
+`RunLogic.deriveRoomSeed(levelSeed, roomIndex)` — its own salt
+(`0x524F4F4D`, "ROOM"), distinct from `deriveEnemySeed`'s and
+`deriveBossSeed`'s, so a level's three rooms, its enemy-placement stream,
+and its boss never collide the way this file's own mix32 header already
+names as a real, previously-seen bug class. `run.roomIndex` is a new,
+hashed field on `Run` (`60-run.js`) recording which room is currently
+loaded.
+
+**The checkpoint: two of its spec's four jobs are real, two are
+reserved.** `Sim.prototype._onRoomClear()` fires the instant a room's
+roster clears (guarded by `_checkpointFired` to once per room, and by
+`!justDied` so a room lost to a death on the exact same tick it clears is
+never saved) — deliberately independent of whether a player has reached
+the room's own exit yet. That separation is load-bearing, not incidental:
+it is what gives the player a real, player-paced window to act before the
+door itself unlocks (advancing to the next room still requires both
+clear AND exit, unchanged from how level→boss always worked).
+`_healAtCheckpoint()` heals every alive player for `CFG.CHECKPOINT_HEAL_FRAC` (0.5) of their own MISSING hp, ceil'd — a checkpoint reached
+at full health correctly heals nothing rather than wasting a flat number,
+and a dead co-op partner is skipped, not phantom-healed.
+`_handInCarriedBlueprints()` is D4's existing hand-in logic, extracted
+out of `_commitPendingLevel()` into its own method so the SAME
+implementation now fires at every checkpoint as well as true run-end —
+D4 already defines hand-in as happening "at a transition," and a
+checkpoint genuinely is one. The real, worth-naming consequence, per the
+spec's own §7d: blueprints become meaningfully easier to cash in, up to
+three hand-in opportunities per level instead of one — a genuine
+economy shift, named here rather than buried. The other two jobs the
+spec's own §7 lists are **not** built yet, named honestly rather than
+silently claimed: the save-and-quit resume point (§7b — a room-scoped
+persistence key `boot()` would restore into on reload) and the
+checkpoint's own narrative beat and SFX cue (§7c's other half — a new
+`DIALOGUE.narrator.checkpoint` pool and SFX table entry). The
+`'checkpoint'` Bus event this release DOES add carries everything a
+future narrative/audio listener would need (`roomIndex`, `healed`,
+`handedIn`) — the chokepoint exists, nothing subscribes to it yet.
+
+**The checkpoint alcove and cinders: the tube's own geometry is real and
+reachability-audited; the economy it exists to serve is reserved, not
+wired.** `Sim.prototype._buildCheckpointAlcove(gen)` stamps a short,
+deliberately wide flat SOLID run directly onto a room's own generated
+exit platform — widening it outward, one tile at a time, stopping the
+instant a column belongs to a different platform rather than skipping
+past it — wide enough (`CFG.CHECKPOINT_ALCOVE_TILES`, 10) for two
+distinct interaction points (the exit itself and the tube) to coexist
+without their radii overlapping, and returns the tube's own `[x,y]`
+anchor. This is a real, deliberate divergence from the spec's own §5,
+named for the record: §5 described a small set of hand-authored
+checkpoint-room layouts, distinct from the fully-procedural combat
+rooms; what shipped instead folds the checkpoint directly onto each
+combat room's own procedurally-generated exit platform, never
+introducing a fifth room type. The tube's own physical placement is real
+(`this.tube`, hashed) and the cinders CFG constants and Bus events
+(`CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE`,
+`'cinderDrop'`/`'cinderLost'`/`'cinderBanked'` in the `EVENTS`
+whitelist) are reserved — but the drop/carry/bank mechanic itself has no
+implementation: no `player.carriedCinders` field, no drop-on-kill roll,
+no bank-at-tube interaction. The economy §8 of the spec describes is
+scoped and its scaffolding is in place; it is not yet a system a player
+can touch.
+
+**A critical bug found — and found again, adversarially, against the
+first fix.** An earlier version of `_buildCheckpointAlcove()` stamped
+every column in its widened range SOLID unconditionally, including
+columns belonging to some OTHER platform sitting at a different row —
+turning that platform's own column into a ceiling directly above it.
+When the takeoff platform for the exit's only incoming jump happened to
+sit under the stamped row, this silently blocked a path the D3a fairness
+audit had already proven legal, in roughly a third of rooms fuzzed.
+Fixed once by stopping the stamp at another platform's own column rather
+than skipping past it — then, adversarially re-testing that exact fix
+rather than trusting it, a second failure mode was found: protecting
+only a platform's own literal column was not enough, because a rising
+jump drifts sideways WHILE still climbing (this game's horizontal and
+vertical motion are fully independent) — a real double-jump climb
+clipped a stamped ceiling four real tiles beyond the takeoff platform's
+own edge. Fixed with a new `CFG.CLIMB_CLEARANCE_TILES` (8) buffer around
+any platform below the exit's own row. Verified with a dedicated
+150-seed regression in `verify_run.js`, reusing `H.attemptHop()` (the
+same real, multi-strategy physics prover `verify_gen.js`'s own "strongest
+claim in the file" already trusts, promoted into `tests/harness.js`
+specifically so this test could reuse it rather than fork an
+independently-tuned copy) to compare reachability WITH and WITHOUT the
+alcove stamped, against a real pre-alcove baseline rather than a flat
+"always reachable" expectation: zero rooms newly blocked by the alcove
+across the sample.
+
+**Further fixes and closed test-coverage gaps, all with regression
+tests.** `loadFallback()` used to leave `this.tube` exactly where the
+just-discarded room left it — a stale `[x,y]` from a world that no
+longer exists, surviving into the emergency-recovery room; fixed with an
+explicit `this.tube = null`, mirroring `_enterBoss()`'s own. `hash()` was
+missing `run.roomIndex` and tube-position coverage — both now hashed
+directly rather than trusted as a pure re-derivation of already-hashed
+state, the same bar `this.exit`'s own hash coverage already holds to.
+Six stale `_enterLevel()`/"level" comments were corrected to
+`_enterRoom()`/"room". `verify_meta.js`'s own keep-first checkpoint
+listener was changed to a counting idiom so it can actually catch a
+double-fire regression, not just the first fire. Eight named
+test-coverage gaps were closed: the heal math (an odd missing-hp number,
+proving the `ceil()`), a checkpoint at full health healing exactly
+nothing, the `_checkpointFired` once-per-room guard, co-op multi-partner
+healing (the event's own `healed` total is the SUM across every
+partner's real share, not just one), a still-dead co-op partner never
+healed nor relocated by a checkpoint or a room-advance transition, a
+room clearing on the exact tick a player dies never firing a checkpoint
+at all, the `ROOM_COUNT` boundary walked room-by-room rather than
+convenience-jumped straight to the end, and the tube's own placement
+geometry (a static clearance proof plus a 30-seed sample proving the
+ideal, non-clamped placement is real reachable code, not dead weight —
+measured at 9/30, 30%, at the current tuning, named honestly as the
+common case being the clamped fallback rather than assumed rare).
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2365/2365 assertions across 16 suites**, `cinder-loop.html` at
+427,064 bytes. The refactor that promoted `attemptHop()`/
+`attemptHopWith()` out of `verify_gen.js` into shared `tests/harness.js`
+infrastructure (alongside the newly-shared `realKill()`/
+`clearRoomAndAdvance()`) is itself a real de-duplication, not incidental
+cleanup — the exact "one sibling patched, others missed" risk this
+project has already been burned by once, closed before a second,
+independently-tuned copy of either could exist.
+
+**What was deliberately not done here.** The cinders economy itself —
+drop, carry, and bank — is scoped and reserved (CFG constants, Bus
+events, the tube's own real geometry) but has no implementation; a
+real, separate follow-up, not a gap discovered later. The checkpoint's
+own narrative beat and SFX cue (spec §7c). The save-and-quit resume
+point (spec §7b) — nothing about an in-progress run's room position
+survives a page reload yet, only permanent meta-progression does, the
+same gap that existed before this release. Branching rooms (spec §11,
+explicitly deferred in favor of a linear chain). A distinct
+hand-authored checkpoint room type (spec §5) — the checkpoint alcove is
+stamped onto an ordinary procedural combat room instead, named above as
+a real, deliberate divergence.
+
+## 5r. Weapon equip & switch — player.weapon goes live, real input, 3 adversarially-found bugs fixed (v0.2.19, D15)
+
+**The single largest already-built-but-inert surface in the game,
+closing at once.** `DATA.WEAPONS` has had four fully real, distinct rows
+since v0.2.10 (D9's locked roster) and `Combat.weaponScale` has read
+`player.weapon` to pick which two D2 stat colours scale a hit since
+v0.2.9 (`40-combat.js:302-313`, fully tested) — but
+`Player.prototype.resetTransient` has hardcoded `this.weapon = 'blade'`
+(`30-player.js:191`) since v0.2.8, and nothing else in the codebase ever
+wrote to that field outside a test. Every one of D9's four weapons, and
+D2's entire per-weapon colour-scaling axis, has been dead build-diversity
+from a player's own perspective for eleven releases — the masterfile's
+own §5 named this gap in these words as recently as v0.2.17. D15
+(`docs/superpowers/specs/2026-08-24-weapon-equip-switch-design.md`, the
+#1-ranked pitch of the post-D13 roadmap) is that path, and nothing else —
+it does not touch generation, enemies, or the checkpoint/cinders work.
+
+**The switch-lockout rule is a correctness requirement, not a feel
+choice.** `Combat.step` re-reads `player.weapon` every tick an attack
+resolves, to compute `Combat.weaponScale(player)` fresh
+(`40-combat.js:335`) — switching weapons mid-swing would silently
+reweight an in-flight move's damage using the NEW weapon's stat-colour
+pair, not the one the move actually belongs to, a real correctness bug
+confirmed by reading the live source, not assumed. `Player.prototype.
+canSwitchWeapon` (`30-player.js`) is a one-line `return !this.attack;` —
+gating on "no active attack" is both necessary and sufficient, since
+`player.weapon` is read nowhere else outside that one path, so no
+additional check against roll/dash/ledge state is needed. Proven across
+an entire chained combo, not just a single swing: `Combat.start`
+repopulates `player.attack` IN PLACE on a chain continuation, never
+passing through null, so a coverage gap this session closed proves
+refusal holds across the whole `slashA` → `slashB` span, not just
+`slashA`'s own duration.
+
+**Two Sim-level methods, the real primitive and its one v1 trigger.**
+`Sim.prototype.switchWeapon(playerIndex, weaponId)` validates
+`player.alive()`, `canSwitchWeapon()`, and (an adversarially-found
+addition, below) `DATA.WEAPON_IDS` membership, before consulting
+`MetaLogic.isUnlocked`; sets `player.weapon`; if `playerIndex === 0`,
+also writes `this.meta.lastWeapon`; emits `'weaponSwitch'`
+(`{playerId, weaponId}`); returns bool — the identical shape `buyMaxHp`
+already established (check preconditions, mutate, return success), and
+directly unit-testable against an exact target weapon.
+`Sim.prototype.cycleWeapon(playerIndex)` is a thin wrapper — the only
+trigger v1 actually ships — that advances to the next UNLOCKED id in
+`DATA.WEAPON_IDS` (already alphabetically sorted, L4-deterministic),
+wrapping around, terminating in at most `ids.length` steps including the
+real, reachable case where the current weapon is the only unlocked one
+(a safe no-op, never a crash or an infinite loop — proven directly, not
+assumed, with `enforceLocks` toggled true via F5 and nothing handed in
+yet).
+
+**A real, permanent, player-facing input from day one — unlike every
+meta purchase before it.** F5-F10 are debug-key stand-ins specifically
+because they are genuine currency *purchases* with no shop UI yet;
+switching an already-unlocked weapon is not a purchase, it is a live
+gameplay action a player wants constantly, so it gets a real input
+immediately: gamepad button 4 (LB, confirmed genuinely unused by
+anything else in this codebase by grep) and keyboard `KeyI` (a free key
+next to the J/K/L/U cluster, confirmed unclaimed). `05-input.js` gained
+`'switchWeapon'` in both `Pad.BUTTONS` and `WINDOW` — copying `parry`'s
+exact two-table shape avoids the file's own named silent trap (a
+`BUTTONS`-only addition leaves `WINDOW[name]` `undefined` forever, with
+`buffered()` always reading false and no error anywhere). The
+consume-and-act itself lives in the SIM layer, not the presenter — a new
+phase 0 in `Sim.prototype.step`, immediately before the existing "1.
+Attack input" phase, so identity resolves before action and a same-tick
+switch-then-attack combo correctly swings with the newly-equipped
+weapon, zero added latency. `92-menu.js` needed zero changes — confirmed,
+not assumed, that the Options screen's rebind row list is already fully
+generic over `Pad.BUTTONS.length`, the same "adding a button is a
+same-step, two-file change" precedent D13's own Parry addition already
+established.
+
+**`meta.lastWeapon` is captured on switch, a genuine simplification over
+the original pitch.** Found by reading the actual reset-timing source
+rather than assuming the pitch's proposed run-end-capture shape was
+correct: if player 0 is the one who died, their own natural respawn
+(`deadFrames` reaching 0) already fires `resetTransient()` — wiping
+`player.weapon` back to `'blade'` — BEFORE `_commitPendingLevel()`'s own
+reset loop (`70-sim.js:902-907`) ever runs. A run-end capture would have
+needed a second hook at the moment of death, mirroring
+`blueprintLost`'s own timing dance — real, avoidable complexity.
+Instead, `meta.lastWeapon` updates immediately, inside `switchWeapon()`
+itself, the instant player 0 explicitly switches — no death-timing edge
+case exists at all. `Sim.prototype._applyMetaToPlayer` — the one shared
+reset hook already called from every reset site — gained one line: reset
+to `resetTransient()`'s safe `'blade'` baseline, then layer the
+permanent choice back on, the exact two-step every other field in that
+method already uses. Only player 0's switches update the shared value —
+co-op partners each freely cycle their own live `player.weapon`
+independently in any given run, unaffected; a named judgment, not an
+oversight, trivially overridable at the cost of one button press.
+
+**Three real production bugs found by a dedicated adversarial-
+verification pass (4 lenses, 20 raw findings, 18 confirmed), fixed:**
+
+1. **`meta.lastWeapon` had no matching save hook.** It is a real,
+   frequently-mutated, player-facing preference — unlike F5-F10's
+   debug-only fields, it can change many times in an ordinary session
+   with no run-end anywhere nearby — the exact "mutated in memory but
+   silently reverted by an ordinary reload" gap `95-app.js`'s own F5/F6
+   comment already documents and was fixed for once. Fixed the same way:
+   a `weaponSwitch` → `saveMeta` listener wired in `95-app.js`, gated to
+   player 0's own switch. Proven through the real `KeyI` key-dispatch
+   path with a real reload in `verify_render.js` — a genuine browser-level
+   regression, not just a unit test against the underlying Sim method.
+2. **`switchWeapon` never validated `weaponId` against
+   `DATA.WEAPON_IDS`, silently accepting garbage.** `MetaLogic.isUnlocked()`
+   returns true unconditionally for ANY argument under Stage 1's own
+   shipped default (`enforceLocks` false) — every pre-D15 caller only
+   ever passed an id already known to be real, so that contract was
+   always safe until `weaponId` became the first untrusted argument to
+   reach it. Fixed with a real membership check, mirroring
+   `MetaLogic.sanitize()`'s own `DATA.WEAPON_IDS` validation.
+3. **The new phase-0 consume loop force-ate a buffered press for a dead
+   player**, unlike every other action in the game — the ONLY one that
+   would have permanently destroyed a buffered press made during a
+   player's death animation instead of leaving it to decay or persist on
+   its own schedule, unlike attack (`Combat.begin`'s own `!player.alive()`
+   check, before its own `pad.buffered()` read) and jump/roll/parry
+   (`Player.prototype.update`'s own dead early-return, before every one
+   of its own `pad.consume()` calls). Fixed with the identical `alive()`
+   guard.
+
+**Roughly ten closed test-coverage gaps beyond the three bugs above,**
+proving claims that were true by inspection but previously unproven:
+chained-combo refusal across the whole `slashA`→`slashB` span (above);
+`cycleWeapon`'s fallback when `player.weapon` is somehow out-of-band
+(the same fixture `verify_stats.js`'s own `Combat.weaponScale` fallback
+uses); an out-of-range or negative `playerIndex` refused by both
+`switchWeapon` and `cycleWeapon` (the first Sim mutators in this
+codebase to take a bare `playerIndex` at all); `switchWeapon` still
+succeeding mid-boss-fight, and the real `KeyI` input path too (no action
+in this codebase is phase-gated, but the claim was unconfirmed until
+driven); a buffered `switchWeapon` press surviving hitstop and firing
+exactly once when the freeze lifts, matching `verify_arch`'s own
+"hitstop does not eat input" contract every other button already holds
+to; `Settings.actionForCode('KeyI')` actually mapping to `'switchWeapon'`
+through the real production dispatch translation, not just the raw
+`DEFAULT_KEYS` config; `_applyMetaToPlayer`'s weapon line exercised
+through a genuine restart, a fallback-when-no-longer-unlocked case, and
+the natural per-death respawn path specifically (the exact edge case §3's
+capture-on-switch design was chosen to avoid needing a second hook for);
+`_applyMetaToPlayer`'s own two call sites (`addPlayer()`, `applyMeta()`)
+each independently proven to reflect a co-op joiner's or a freshly-loaded
+save's current `meta.lastWeapon`; and co-op independence under death and
+respawn interleaving — player 1 cycling freely while player 0 is dead and
+naturally respawns in the same window, proving the two are structurally
+disjoint by a combined test, not just by separate claims about each half.
+
+**Verified against real sim ticks and a real browser (L8).**
+`bash tests/run_all.sh` → **GREEN 2505/2505 assertions across 16
+suites**, `cinder-loop.html` at 434,920 bytes.
+
+**What was deliberately not done here — named honestly, not silently
+dropped.** No HUD indicator of the currently-equipped weapon
+(`80-view.js`) — a real, separate presenter gap. No touch-input wiring
+for `switchWeapon` (L13 defers this: desktop + gamepad first). No
+per-player independent "last weapon" memory — `meta.lastWeapon` is
+single and shared, sourced from player 0 only, a named judgment from §3
+of the spec. No currency cost anywhere in this feature — both
+starting-loadout selection and in-run switching are free, per the
+approved design, deliberately not folded into D8's purchase model.
 
 ---
 
