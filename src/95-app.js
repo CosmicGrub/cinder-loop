@@ -165,7 +165,12 @@ function saveMeta(meta) {
  * Standard gamepad mapping. Face button 0 jumps, 1 and 5 roll (B and RB, so
  * both thumb and shoulder work), 2 attacks, 3 parries (abilities spec §2b —
  * the next free face button, same grouping as the other three core actions),
- * dpad 12-15 and the left stick both steer.
+ * dpad 12-15 and the left stick both steer. Button 4 (LB) switches weapons
+ * (D15) — confirmed genuinely unused by anything else in this codebase
+ * before this. Only ever translates hardware into pad.set() calls, the
+ * exact same shape every other action here already uses — the actual
+ * consume-and-act decision lives in the SIM layer (Sim.prototype.step's
+ * own phase 0), never here, so a scripted test never needs a fake gamepad.
  * ======================================================================== */
 function pollGamepad(pad, gp) {
   if (!gp) return;
@@ -179,6 +184,7 @@ function pollGamepad(pad, gp) {
   pad.set('roll', !!((gp.buttons[1] && gp.buttons[1].pressed) || (gp.buttons[5] && gp.buttons[5].pressed)));
   pad.set('attack', !!(gp.buttons[2] && gp.buttons[2].pressed));
   pad.set('parry', !!(gp.buttons[3] && gp.buttons[3].pressed));
+  pad.set('switchWeapon', !!(gp.buttons[4] && gp.buttons[4].pressed));
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -244,6 +250,18 @@ function boot(canvas, hud, seed) {
   // a timer or every frame — _commitPendingLevel() only fires at a real
   // D4 "transition."
   sim.bus.on('runEnd', function () { saveMeta(sim.meta); });
+  // D15 (weapon equip & switch): meta.lastWeapon is a real, frequently-
+  // mutated, player-facing preference (Sim.prototype.switchWeapon writes
+  // it the instant player 0 switches) — unlike F5-F10's debug-only fields,
+  // it can be changed many times in an ordinary session with no run-end
+  // anywhere nearby. Without a dedicated save hook, this is the exact
+  // "mutated in memory but silently reverted by an ordinary reload" gap
+  // this file's own F5/F6 comment above already documents and fixed once
+  // for those two fields — adversarially found again here, fixed the same
+  // way: save immediately, gated to player 0's own switch (the only one
+  // that actually touches shared meta; a co-op partner's own live
+  // player.weapon is per-player and never persisted).
+  sim.bus.on('weaponSwitch', function (e) { if (e.playerId === sim.players[0].id) saveMeta(sim.meta); });
 
   // A silent practice dummy near spawn, before anything that fights back —
   // boot-path flavor, not part of 60-run.js's own roster (a Dummy is a
@@ -681,6 +699,8 @@ function boot(canvas, hud, seed) {
     if (gp.buttons[13] && gp.buttons[13].pressed) pad.set('down', true);
     // Same face button 3 pollGamepad's own co-op mapping uses for parry.
     if (gp.buttons[3] && gp.buttons[3].pressed) pad.set('parry', true);
+    // Same button 4 pollGamepad's own co-op mapping uses for switchWeapon (D15).
+    if (gp.buttons[4] && gp.buttons[4].pressed) pad.set('switchWeapon', true);
   }
 
   // Takes the View, not the raw canvas: it needs cssW, the LOGICAL width, to

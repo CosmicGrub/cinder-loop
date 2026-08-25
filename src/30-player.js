@@ -278,6 +278,15 @@ Player.prototype.invulnerable = function () {
   return this.iframes > 0 || this.state === 'roll' || this.state === 'dash';
 };
 Player.prototype.alive = function () { return this.state !== 'dead'; };
+// D15 (weapon equip & switch): Combat.step re-reads player.weapon every
+// tick an attack resolves (Combat.weaponScale, 40-combat.js:302-313) to
+// scale its damage — switching mid-swing would silently reweight an
+// in-flight move's damage using the NEW weapon's stat-colour pair, not
+// the one the move actually belongs to. Gating on "no active attack" is
+// necessary and sufficient: player.weapon is read nowhere else outside
+// that one path (design spec §1) — no additional check against roll/
+// dash/ledge state is needed.
+Player.prototype.canSwitchWeapon = function () { return !this.attack; };
 
 Player.prototype.update = function (pad, world, bus) {
   var b = this.body;

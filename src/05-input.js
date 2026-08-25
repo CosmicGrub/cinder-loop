@@ -14,7 +14,7 @@
 
 var CFG = C.CFG;
 
-var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry'];
+var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry', 'switchWeapon'];
 
 /* Per-button grace window. Jump gets the tighter buffer because it is the
  * one players spam at the edge of a landing; everything else gets the longer
@@ -34,7 +34,8 @@ var WINDOW = {
   jump: CFG.JUMP_BUFFER_FRAMES,
   roll: CFG.PENDING_FRAMES,
   attack: CFG.PENDING_FRAMES,
-  parry: CFG.PENDING_FRAMES
+  parry: CFG.PENDING_FRAMES,
+  switchWeapon: CFG.PENDING_FRAMES
 };
 
 function Pad() {

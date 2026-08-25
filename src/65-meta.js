@@ -54,6 +54,12 @@ function Meta() {
                                // accumulates within a session; this file's only
                                // new contribution is making it survive a reload
   this.unlocked = {};         // weaponId -> true, meaningful only once enforceLocks is true
+  // D15 (weapon equip & switch): which WEAPONS id a fresh reset applies
+  // (see 70-sim.js's own _applyMetaToPlayer). Defaults to 'blade' — the
+  // same default resetTransient() already uses, so a first boot needs no
+  // migration. Updated by Sim.prototype.switchWeapon the instant player 0
+  // explicitly switches (design spec §3) — not a run-end snapshot.
+  this.lastWeapon = 'blade';
   this.maxHpBonus = 0;        // permanent +max HP, stacked one META_MAXHP_GAIN at a time
   this.enforceLocks = CFG.META_ENFORCE_LOCKS_DEFAULT;   // D4's own "debug-room toggle"
   // Ability enhancements (abilities spec §4) — four independent flat-cost
@@ -107,6 +113,9 @@ function sanitize(raw) {
       if (raw.unlocked[ids[i]] === true) out.unlocked[ids[i]] = true;
     }
   }
+  // D15: the same "validate against DATA.WEAPON_IDS, fall back to the
+  // safe default otherwise" pattern `unlocked` above already uses.
+  if (C.DATA.WEAPON_IDS.indexOf(raw.lastWeapon) !== -1) out.lastWeapon = raw.lastWeapon;
   return out;
 }
 

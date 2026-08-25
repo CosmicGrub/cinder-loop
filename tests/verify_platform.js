@@ -23,6 +23,7 @@ const Settings = C.Settings, Menu = C.Menu, Pad = C.Pad;
   }
   s.eq('defaults match the pre-settings keymap: jump', d.keybinds.jump.join(','), 'Space,KeyK');
   s.eq('defaults match the pre-settings keymap: roll', d.keybinds.roll.join(','), 'ShiftLeft,ShiftRight,KeyL');
+  s.eq('switchWeapon defaults to the free KeyI binding (D15)', d.keybinds.switchWeapon.join(','), 'KeyI');
   s.eq('reduced motion defaults off', d.reducedMotion, false);
   s.eq('the frame meter defaults on', d.showMeter, true);
   s.eq('sound defaults unmuted', d.muted, false);
@@ -184,6 +185,12 @@ const Settings = C.Settings, Menu = C.Menu, Pad = C.Pad;
   s.eq('actionForCode finds a bound key', Settings.actionForCode(d, 'Space'), 'jump');
   s.eq('actionForCode finds the second binding for a key with two', Settings.actionForCode(d, 'KeyK'), 'jump');
   s.eq('actionForCode returns null for an unbound key', Settings.actionForCode(d, 'KeyZ'), null);
+  // Adversarially found (coverage gap): the default keybind array check
+  // above (line 26) only proves the raw DEFAULT_KEYS config contains
+  // 'KeyI' — it never proves the real production dispatch translation
+  // (a KeyboardEvent.code -> Settings.actionForCode -> pad.set(...)) that
+  // 95-app.js actually relies on for the new D15 binding.
+  s.eq('actionForCode maps KeyI to switchWeapon (D15)', Settings.actionForCode(d, 'KeyI'), 'switchWeapon');
 }
 
 /* =================================================================== rebind */

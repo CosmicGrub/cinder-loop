@@ -24,6 +24,25 @@ const s = new H.Suite('verify_meta');
 const C = H.loadSim();
 const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA;
 
+/* ================================== 0. D15 input plumbing (05-input.js)
+ * The same BUTTONS/WINDOW two-map trap parry's own regression already
+ * guards. Settings' own DEFAULT_KEYS-must-exist-for-every-BUTTONS-entry
+ * contract is covered in verify_platform.js instead — Settings has zero
+ * dependency on Sim (this file's own header, echoing 90-settings.js's own
+ * split) and loadSim() here never loads it. */
+{
+  const Pad = C.Pad;
+  s.ok('switchWeapon exists in Pad.BUTTONS', Pad.BUTTONS.indexOf('switchWeapon') !== -1);
+  s.ok('Pad.WINDOW.switchWeapon is a real positive number',
+    Pad.WINDOW.switchWeapon > 0, Pad.WINDOW.switchWeapon);
+
+  const pad = new Pad();
+  pad.set('switchWeapon', true); pad.update(false);
+  s.ok('a fresh press is buffered', pad.buffered('switchWeapon'));
+  s.ok('and actually consumable', pad.consume('switchWeapon'));
+  s.ok('consuming clears it', !pad.buffered('switchWeapon'));
+}
+
 /* ============================================================ 1. defaults */
 {
   const d = MetaLogic.defaults();
@@ -31,6 +50,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   s.eq('currency starts at zero', d.currency, 0);
   s.eq('nothing is explicitly unlocked yet', Object.keys(d.unlocked).length, 0);
   s.eq('maxHpBonus starts at zero', d.maxHpBonus, 0);
+  s.eq('lastWeapon defaults to blade (D15)', d.lastWeapon, 'blade');
   s.eq('enforceLocks matches Stage 1\'s own default', d.enforceLocks, CFG.META_ENFORCE_LOCKS_DEFAULT);
   s.eq('Stage 1 ships pre-unlocked (D4)', CFG.META_ENFORCE_LOCKS_DEFAULT, false);
 
@@ -64,7 +84,9 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     ['unlocked as an array', { version: 1, unlocked: [] }],
     ['an unknown weapon id in unlocked', { version: 1, unlocked: { flyToTheMoon: true } }],
     ['a real weapon id set to a non-true value', { version: 1, unlocked: { blade: 1 } }],
-    ['a deeply nested garbage blob', { version: 1, unlocked: { blade: { nested: true } } }]
+    ['a deeply nested garbage blob', { version: 1, unlocked: { blade: { nested: true } } }],
+    ['lastWeapon a real, valid weapon id (D15)', { version: 1, lastWeapon: 'warmaul' }],
+    ['lastWeapon an unknown id (D15)', { version: 1, lastWeapon: 'flyToTheMoon' }]
   ];
   for (const [label, input] of cases) {
     let out, threw = false;
@@ -77,6 +99,8 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
       s.ok('and maxHpBonus is always a finite non-negative number',
         typeof out.maxHpBonus === 'number' && isFinite(out.maxHpBonus) && out.maxHpBonus >= 0);
       s.eq('and enforceLocks is always strictly boolean', typeof out.enforceLocks, 'boolean');
+      s.ok('and lastWeapon is always a real DATA.WEAPON_IDS entry (D15)',
+        DATA.WEAPON_IDS.indexOf(out.lastWeapon) !== -1);
       for (const id in out.unlocked) {
         s.ok('and every unlocked key is a real weapon id set to true',
           DATA.WEAPON_IDS.indexOf(id) !== -1 && out.unlocked[id] === true);
@@ -98,12 +122,14 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
 {
   const m = MetaLogic.defaults();
   m.currency = 55; m.maxHpBonus = 2; m.enforceLocks = true; m.unlocked.warmaul = true;
+  m.lastWeapon = 'thornspear';
   const text = MetaLogic.serialize(m);
   const back = MetaLogic.deserialize(text);
   s.eq('serialize -> deserialize round-trips currency', back.currency, 55);
   s.eq('and maxHpBonus', back.maxHpBonus, 2);
   s.eq('and enforceLocks', back.enforceLocks, true);
   s.eq('and unlocked', back.unlocked.warmaul, true);
+  s.eq('and lastWeapon (D15)', back.lastWeapon, 'thornspear');
 
   s.ok('deserialize never throws on malformed JSON text',
     (() => { try { MetaLogic.deserialize('{not json'); return true; } catch (e) { return false; } })());
@@ -243,9 +269,12 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.settle();
   a.sim.beginRun(23);
   a.sim.meta.maxHpBonus = 1;
+  a.sim.meta.lastWeapon = 'daggers';   // D15: _applyMetaToPlayer's own new line
   const joiner = a.sim.addPlayer();
   s.eq('a co-op joiner immediately reflects the current permanent bonus',
     joiner.maxHp, CFG.MAX_HP + 1);
+  s.eq('a co-op joiner also reflects the current meta.lastWeapon (D15)',
+    joiner.weapon, 'daggers');
 }
 
 /* ============================================== ability enhancements (§4)
@@ -357,6 +386,356 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   s.eq('player 1 owns it too, same live purchase', a.p(1).parryRiposte, true);
 }
 
+/* ============================================ D15: _applyMetaToPlayer's
+ * new weapon line. The 2-step "reset to baseline, then layer the
+ * permanent value" pattern, exercised through the same distinct call
+ * sites buyDashExtraCharge's own tests above already prove for maxHp/
+ * dashCharges — a genuine restart, a fallback when the pick is no longer
+ * unlocked, and the natural per-death respawn path (the exact edge case
+ * the design spec's §3 says capture-on-switch avoids needing a second
+ * hook for). */
+{
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(60);
+  a.sim.meta.lastWeapon = 'daggers';
+  a.sim.beginRun(61);
+  s.eq('a genuine restart applies the current meta.lastWeapon', a.p().weapon, 'daggers');
+}
+{
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(62);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.lastWeapon = 'warmaul';   // set while unlocked...
+  a.sim.meta.unlocked = {};            // ...then the pool is emptied under it
+  a.sim.beginRun(63);
+  s.eq('a reset falls back to blade when lastWeapon is no longer unlocked', a.p().weapon, 'blade');
+}
+{
+  // The natural per-death respawn path — a live death, not a restart, not
+  // a manual resetTransient() — the exact case the design's §3 says was
+  // the reason a run-end capture (rather than capture-on-switch) would
+  // have needed a second timing-sensitive hook here.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(64);
+  a.sim.meta.lastWeapon = 'thornspear';
+  a.p().weapon = 'blade';   // mid-run: playing something OTHER than the saved default
+  a.p().hurt(999, a.sim.bus);
+  s.eq('a real death actually happened', a.p().state, 'dead');
+  let g = 0;
+  while (a.p().state === 'dead' && g++ < 200) a.step(1);
+  s.eq('a natural respawn happened, not a restart', a.p().state !== 'dead', true);
+  s.eq('the natural respawn re-applies meta.lastWeapon, not whatever was equipped before dying',
+    a.p().weapon, 'thornspear');
+}
+
+/* ================================== D15: Sim.prototype.switchWeapon */
+{
+  const a = H.scenario({ players: 2 });
+  a.settle();
+  a.sim.beginRun(70);
+
+  a.sim.meta.enforceLocks = true;
+  s.eq('refuses a locked weapon (enforceLocks true, nothing unlocked)',
+    a.sim.switchWeapon(0, 'daggers'), false);
+  s.eq('nothing changed on refusal', a.p().weapon, 'blade');
+  a.sim.meta.enforceLocks = false;
+
+  a.tap('attack');
+  s.eq('refuses mid-attack', a.sim.switchWeapon(0, 'daggers'), false);
+  s.eq('still the old weapon mid-swing', a.p().weapon, 'blade');
+  let g = 0;
+  while (a.p().attack && g++ < 60) a.step(1);
+
+  s.eq('succeeds once the swing has actually ended', a.sim.switchWeapon(0, 'daggers'), true);
+  s.eq('the weapon actually changed', a.p().weapon, 'daggers');
+  s.eq('player 0 switching updates meta.lastWeapon', a.sim.meta.lastWeapon, 'daggers');
+  s.eq('exactly one weaponSwitch event fired', a.count('weaponSwitch'), 1);
+  const ev = a.events('weaponSwitch')[0].payload;
+  s.eq('...with the correct playerId', ev.playerId, 0);
+  s.eq('...and the correct weaponId', ev.weaponId, 'daggers');
+
+  s.eq('player 1 switching succeeds independently', a.sim.switchWeapon(1, 'warmaul'), true);
+  s.eq("player 1's own weapon changed", a.p(1).weapon, 'warmaul');
+  s.eq('player 1 switching does NOT touch meta.lastWeapon', a.sim.meta.lastWeapon, 'daggers');
+
+  // Adversarially found: MetaLogic.isUnlocked() alone returns true for ANY
+  // argument under the shipped default (enforceLocks false) — every
+  // pre-D15 caller only ever passed a real id, so switchWeapon needs its
+  // own membership check at this boundary (untrusted argument).
+  s.eq('refuses an id that is not a real weapon, even under Stage 1\'s default',
+    a.sim.switchWeapon(0, 'not-a-real-weapon'), false);
+  s.eq('nothing changed on that refusal either', a.p().weapon, 'daggers');
+  s.eq('and meta.lastWeapon is untouched too', a.sim.meta.lastWeapon, 'daggers');
+
+  s.eq('refuses an out-of-range playerIndex (too high)', a.sim.switchWeapon(5, 'blade'), false);
+  s.eq('refuses a negative playerIndex', a.sim.switchWeapon(-1, 'blade'), false);
+  s.eq('neither touches meta.lastWeapon', a.sim.meta.lastWeapon, 'daggers');
+
+  a.p().hurt(999, a.sim.bus);
+  s.eq('a real death actually happened', a.p().state, 'dead');
+  s.eq('refuses a dead player', a.sim.switchWeapon(0, 'thornspear'), false);
+}
+
+{
+  // Adversarially found (coverage gap, plan's own Verification risk #2):
+  // canSwitchWeapon's refusal was only ever proven across a SINGLE,
+  // non-chaining swing — Combat.start repopulates player.attack IN PLACE
+  // on a chain continuation (40-combat.js), never passing through null,
+  // so refusal must hold across the entire slashA -> slashB span too, not
+  // just slashA's own duration. Mirrors verify_combat.js's own combo test
+  // shape exactly (hold+step+release, then an early re-press before
+  // chainFrom).
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(76);
+  a.hold('attack').step(1).release('attack');
+  s.eq('slashA started', a.p().attack.id, 'slashA');
+  s.eq('refuses on slashA\'s own first frame', a.sim.switchWeapon(0, 'daggers'), false);
+
+  a.step(1);
+  a.hold('attack').step(1).release('attack');   // buffer the chain press early
+  s.eq('the early chain press does not restart the move', a.p().attack.id, 'slashA');
+  s.eq('still refuses while slashA is still resolving', a.sim.switchWeapon(0, 'daggers'), false);
+
+  let guard = 0;
+  while (a.p().attack && a.p().attack.id === 'slashA' && guard++ < 60) {
+    s.eq('refuses on every remaining frame of slashA', a.sim.switchWeapon(0, 'daggers'), false);
+    a.step(1);
+  }
+  s.eq('the buffered press actually chained into slashB', a.p().attack ? a.p().attack.id : null, 'slashB');
+  s.eq('refusal continues into the chained move, not just the first one',
+    a.sim.switchWeapon(0, 'daggers'), false);
+
+  let guard2 = 0;
+  while (a.p().attack && guard2++ < 60) {
+    s.eq('refuses through the rest of slashB too', a.sim.switchWeapon(0, 'daggers'), false);
+    a.step(1);
+  }
+  s.eq('succeeds once the WHOLE chain has fully ended', a.sim.switchWeapon(0, 'daggers'), true);
+}
+
+/* =================================== D15: Sim.prototype.cycleWeapon */
+{
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(71);
+  // Every id unlocked (Stage 1 default) — cycles through DATA.WEAPON_IDS
+  // in its own alphabetical order and wraps.
+  s.eq('starts on blade', a.p().weapon, 'blade');
+  a.sim.cycleWeapon(0);
+  s.eq('advances to daggers', a.p().weapon, 'daggers');
+  a.sim.cycleWeapon(0);
+  s.eq('advances to thornspear', a.p().weapon, 'thornspear');
+  a.sim.cycleWeapon(0);
+  s.eq('advances to warmaul', a.p().weapon, 'warmaul');
+  a.sim.cycleWeapon(0);
+  s.eq('wraps from the last unlocked id back to the first', a.p().weapon, 'blade');
+}
+{
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(72);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.unlocked = { blade: true, warmaul: true };
+  s.eq('starts on blade', a.p().weapon, 'blade');
+  a.sim.cycleWeapon(0);
+  s.eq('skips locked daggers/thornspear, lands on warmaul', a.p().weapon, 'warmaul');
+  a.sim.cycleWeapon(0);
+  s.eq('skips locked ids again, wraps to blade', a.p().weapon, 'blade');
+}
+{
+  // Real, reachable state (F5 toggled true with nothing handed in yet).
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(73);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.unlocked = { blade: true };   // ONLY the current weapon unlocked
+  const before = a.p().weapon;
+  let threw = false;
+  try { a.sim.cycleWeapon(0); } catch (e) { threw = true; }
+  s.ok('never throws when only one weapon is unlocked', !threw);
+  s.eq('a safe no-op, weapon unchanged', a.p().weapon, before);
+  s.eq('and correctly reports no switch happened', a.sim.cycleWeapon(0), false);
+}
+{
+  // Adversarially found (coverage gap, plan's own Verification risk #3):
+  // the indexOf===-1 -> start=0 fallback (guarding an out-of-band
+  // player.weapon) was safe by inspection but never actually exercised —
+  // this is a REAL reachable state (verify_stats.js's own Combat.
+  // weaponScale fallback fixture sets player.weapon this exact way).
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(74);
+  a.p().weapon = 'not-a-real-weapon';   // same fixture verify_stats.js uses
+  let threw = false;
+  try { a.sim.cycleWeapon(0); } catch (e) { threw = true; }
+  s.ok('never throws on an out-of-band player.weapon', !threw);
+  s.ok('lands on a real, unlocked WEAPON_IDS entry', DATA.WEAPON_IDS.indexOf(a.p().weapon) !== -1);
+  // The loop checks candidates starting at (start+1), not start itself —
+  // with start=0 (the fallback's own value), the first candidate actually
+  // checked is DATA.WEAPON_IDS[1], not [0].
+  s.eq('specifically DATA.WEAPON_IDS[1] — the first candidate the start=0 fallback actually checks',
+    a.p().weapon, DATA.WEAPON_IDS[1]);
+}
+{
+  // Same fallback, but forced to walk the FULL ids.length range before
+  // landing on its wrap-around target — proves the loop doesn't stop
+  // early via the (dead, for an invalid starting id) self-match guard.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(75);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.unlocked = { blade: true };   // only index 0 unlocked
+  a.p().weapon = 'not-a-real-weapon';
+  a.sim.cycleWeapon(0);
+  s.eq('walks the full range and lands on the only unlocked id (index 0)', a.p().weapon, 'blade');
+}
+{
+  // Out-of-range playerIndex — switchWeapon/cycleWeapon are the FIRST Sim
+  // mutators in this codebase to take a bare playerIndex, and the guard's
+  // actual behavior was unproven, not just unlikely.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(77);
+  s.eq('cycleWeapon refuses an out-of-range playerIndex', a.sim.cycleWeapon(5), false);
+  s.eq('cycleWeapon refuses a negative playerIndex', a.sim.cycleWeapon(-1), false);
+  s.eq('player 0 is untouched by either refusal', a.p().weapon, 'blade');
+}
+
+/* ============================ D15: phase 0 in Sim.prototype.step — proves
+ * the whole feature is reachable through real input (pad.set()), not just
+ * through direct sim.switchWeapon()/sim.cycleWeapon() calls above. */
+{
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(80);
+  s.eq('starts on blade', a.p().weapon, 'blade');
+  a.tap('switchWeapon');
+  s.eq('a real buffered press actually cycles the weapon', a.p().weapon, 'daggers');
+}
+{
+  // Destructive consume: one press must never fire two switches, even
+  // held across several ticks (mirrors Pad's own "one press, one action"
+  // contract every other button already relies on).
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(81);
+  a.hold('switchWeapon').step(5);
+  s.eq('holding the button only cycles once, not once per tick', a.p().weapon, 'daggers');
+  a.release('switchWeapon').step(1);
+}
+{
+  // Same-tick switch-then-attack: phase 0 resolves identity before phase
+  // 1 resolves action, so the swing that starts THIS tick already reads
+  // the newly-equipped weapon (design spec §4's own "zero added latency"
+  // claim).
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(82);
+  a.hold('switchWeapon').hold('attack').step(1);
+  s.eq('the weapon switched this exact tick', a.p().weapon, 'daggers');
+  s.ok('and the attack that started this SAME tick already used it',
+    a.p().attack && a.p().attack.id === DATA.WEAPONS.daggers.light);
+  a.release('switchWeapon').release('attack');
+}
+{
+  // Co-op: independent pads, independent player.weapon, no cross-talk.
+  const a = H.scenario({ players: 2 });
+  a.settle();
+  a.sim.beginRun(83);
+  a.tap('switchWeapon', 0);
+  s.eq('player 0 cycled', a.p(0).weapon, 'daggers');
+  s.eq('player 1 untouched by player 0\'s own press', a.p(1).weapon, 'blade');
+  // A real extra tick between the two presses — tap()'s own release only
+  // actually lands on the sim's NEXT processed step (its own release() is
+  // a zero-tick call), so back-to-back taps with no step between them
+  // would read as one continuous hold, not two presses.
+  a.tap('switchWeapon', 1).step(1);
+  a.tap('switchWeapon', 1);
+  s.eq('player 1 cycled independently, twice', a.p(1).weapon, 'thornspear');
+  s.eq('player 0 unaffected by player 1\'s presses', a.p(0).weapon, 'daggers');
+  s.eq('only player 0\'s cycling touched meta.lastWeapon', a.sim.meta.lastWeapon, 'daggers');
+}
+{
+  // Adversarially found (coverage gap): "pads update even while frozen...
+  // a press made during hitstop arms its buffer and is still there when
+  // the freeze lifts" is verify_arch's own contract for every OTHER
+  // button (its own "hitstop does not eat input" section) — switchWeapon
+  // must hold to it too, unproven until now. Same real-hitstop trigger
+  // that section already uses (a real slam landing).
+  const a = H.scenario({ seed: 9 });
+  a.settle();
+  a.tap('jump');
+  a.step(6);
+  a.tap('down');
+  for (let i = 0; i < 60 && a.sim.hitstop === 0; i++) a.sim.step();
+  s.ok('a real hitstop is in effect', a.sim.hitstop > 0, a.sim.hitstop + ' frames');
+
+  a.hold('switchWeapon');
+  a.step(1);
+  s.ok('the press is latched', a.pad().down('switchWeapon'));
+  s.ok('the buffer armed even though frozen', a.pad().buffered('switchWeapon'));
+  s.eq('phase 0 does NOT consume it while frozen — the weapon is unchanged', a.p().weapon, 'blade');
+
+  for (let i = 0; i < 20 && a.sim.hitstop > 0; i++) a.sim.step();
+  a.step(1);
+  s.eq('the buffered press survives hitstop and cycles once the freeze lifts', a.p().weapon, 'daggers');
+  a.release('switchWeapon').step(5);
+  s.eq('and only once — not once per frozen tick', a.p().weapon, 'daggers');
+}
+{
+  // Adversarially found (coverage gap): no action in this codebase is
+  // phase-gated (attack/roll/jump/parry are never checked against
+  // run.phase either), so switchWeapon staying live mid-boss-fight is
+  // correct-by-construction — but it was an unconfirmed assumption, not
+  // a proven one, and the design spec never mentions the boss phase.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(84);
+  a.sim._enterBoss();
+  s.eq('run.phase is really boss', a.sim.run.phase, 'boss');
+  s.eq('switchWeapon still works mid-boss-fight', a.sim.switchWeapon(0, 'daggers'), true);
+  a.tap('switchWeapon');
+  s.eq('and the real input path works mid-boss-fight too', a.p().weapon, 'thornspear');
+}
+{
+  // Adversarially found (coverage gap, plan's own Verification risk #4):
+  // player 1 independently cycling while player 0 dies and naturally
+  // respawns (re-triggering _applyMetaToPlayer) in the same window — the
+  // two are structurally disjoint (per-player state, playerIndex===0 gate
+  // on meta.lastWeapon), but that claim was never actually driven by a
+  // combined test.
+  const a = H.scenario({ players: 2 });
+  a.settle();
+  a.sim.beginRun(85);
+  a.sim.switchWeapon(0, 'warmaul');
+  s.eq('meta.lastWeapon reflects player 0\'s own switch', a.sim.meta.lastWeapon, 'warmaul');
+
+  a.p(0).hurt(999, a.sim.bus);
+  s.eq('player 0 is really dead', a.p(0).state, 'dead');
+
+  // Player 1 keeps cycling independently WHILE player 0 is mid-countdown.
+  a.tap('switchWeapon', 1);
+  s.eq('player 1 cycled while player 0 was dead', a.p(1).weapon, 'daggers');
+  s.eq('meta.lastWeapon is untouched by player 1\'s own cycling', a.sim.meta.lastWeapon, 'warmaul');
+
+  let g = 0;
+  while (a.p(0).state === 'dead' && g++ < 200) {
+    a.tap('switchWeapon', 1);   // keep cycling player 1 through the whole window
+    a.step(1);
+  }
+  s.eq('player 0 naturally respawned, not a restart', a.p(0).state !== 'dead', true);
+  s.eq('player 0\'s respawn re-applied meta.lastWeapon regardless of player 1\'s activity',
+    a.p(0).weapon, 'warmaul');
+  s.eq('meta.lastWeapon still reflects only player 0\'s own last real switch',
+    a.sim.meta.lastWeapon, 'warmaul');
+  s.ok('player 1\'s own weapon kept advancing independently the whole time',
+    a.p(1).weapon !== 'blade');
+}
+
 {
   const a = H.scenario();
   a.settle();
@@ -391,11 +770,13 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.settle();
   a.sim.beginRun(41);
   const loaded = C.MetaLogic.defaults();
-  loaded.currency = 500; loaded.maxHpBonus = 2;
+  loaded.currency = 500; loaded.maxHpBonus = 2; loaded.lastWeapon = 'thornspear';
   a.sim.applyMeta(loaded);
   s.eq('applyMeta() adopts the new currency', a.sim.meta.currency, 500);
   s.eq('and immediately re-applies maxHpBonus to the current player',
     a.p().maxHp, CFG.MAX_HP + 2);
+  s.eq('and immediately re-applies lastWeapon to the current player too (D15)',
+    a.p().weapon, 'thornspear');
   s.ok('applyMeta() copies rather than adopts the reference', a.sim.meta !== loaded);
   loaded.currency = 999999;
   s.eq('mutating the caller\'s own object afterward does not reach back into the sim',
@@ -737,6 +1118,11 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   const altRoom = H.scenario(); altRoom.settle(); altRoom.sim.beginRun(40);
   altRoom.clearRoomAndAdvance(1);
   s.ok('a differing run.roomIndex changes the hash', base.sim.hash() !== altRoom.sim.hash());
+
+  // D15: meta.lastWeapon decides a FUTURE reset's player.weapon.
+  const altW = H.scenario(); altW.settle(); altW.sim.beginRun(40);
+  altW.sim.meta.lastWeapon = 'daggers';
+  s.ok('a differing meta.lastWeapon changes the hash', base.sim.hash() !== altW.sim.hash());
 }
 
 {

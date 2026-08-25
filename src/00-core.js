@@ -512,7 +512,12 @@ var EVENTS = [
   // event, the same "one event per real fact" discipline blueprintDrop/
   // blueprintLost/blueprintUnlocked already established for the other
   // carried resource.
-  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked'
+  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked',
+  // D15 (weapon equip & switch): fires from Sim.prototype.switchWeapon the
+  // instant a switch succeeds. Payload names the weapon explicitly
+  // (weaponId, not blueprintUnlocked's own easier-to-misread `id`) — a
+  // deliberate small clarity improvement, not an oversight.
+  'weaponSwitch'
 ];
 
 function Bus() {

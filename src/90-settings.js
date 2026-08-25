@@ -38,7 +38,8 @@ var DEFAULT_KEYS = {
   jump: ['Space', 'KeyK'],
   roll: ['ShiftLeft', 'ShiftRight', 'KeyL'],
   attack: ['KeyJ'],
-  parry: ['KeyU']
+  parry: ['KeyU'],
+  switchWeapon: ['KeyI']
 };
 
 // A KeyboardEvent.code is always alphanumeric (ArrowLeft, Space, Digit1,

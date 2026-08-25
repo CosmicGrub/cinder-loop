@@ -587,7 +587,12 @@ var EVENTS = [
   // event, the same "one event per real fact" discipline blueprintDrop/
   // blueprintLost/blueprintUnlocked already established for the other
   // carried resource.
-  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked'
+  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked',
+  // D15 (weapon equip & switch): fires from Sim.prototype.switchWeapon the
+  // instant a switch succeeds. Payload names the weapon explicitly
+  // (weaponId, not blueprintUnlocked's own easier-to-misread `id`) — a
+  // deliberate small clarity improvement, not an oversight.
+  'weaponSwitch'
 ];
 
 function Bus() {
@@ -658,7 +663,7 @@ C.aabb = aabb;
 
 var CFG = C.CFG;
 
-var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry'];
+var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry', 'switchWeapon'];
 
 /* Per-button grace window. Jump gets the tighter buffer because it is the
  * one players spam at the edge of a landing; everything else gets the longer
@@ -678,7 +683,8 @@ var WINDOW = {
   jump: CFG.JUMP_BUFFER_FRAMES,
   roll: CFG.PENDING_FRAMES,
   attack: CFG.PENDING_FRAMES,
-  parry: CFG.PENDING_FRAMES
+  parry: CFG.PENDING_FRAMES,
+  switchWeapon: CFG.PENDING_FRAMES
 };
 
 function Pad() {
@@ -1686,6 +1692,15 @@ Player.prototype.invulnerable = function () {
   return this.iframes > 0 || this.state === 'roll' || this.state === 'dash';
 };
 Player.prototype.alive = function () { return this.state !== 'dead'; };
+// D15 (weapon equip & switch): Combat.step re-reads player.weapon every
+// tick an attack resolves (Combat.weaponScale, 40-combat.js:302-313) to
+// scale its damage — switching mid-swing would silently reweight an
+// in-flight move's damage using the NEW weapon's stat-colour pair, not
+// the one the move actually belongs to. Gating on "no active attack" is
+// necessary and sufficient: player.weapon is read nowhere else outside
+// that one path (design spec §1) — no additional check against roll/
+// dash/ledge state is needed.
+Player.prototype.canSwitchWeapon = function () { return !this.attack; };
 
 Player.prototype.update = function (pad, world, bus) {
   var b = this.body;
@@ -4926,6 +4941,12 @@ function Meta() {
                                // accumulates within a session; this file's only
                                // new contribution is making it survive a reload
   this.unlocked = {};         // weaponId -> true, meaningful only once enforceLocks is true
+  // D15 (weapon equip & switch): which WEAPONS id a fresh reset applies
+  // (see 70-sim.js's own _applyMetaToPlayer). Defaults to 'blade' — the
+  // same default resetTransient() already uses, so a first boot needs no
+  // migration. Updated by Sim.prototype.switchWeapon the instant player 0
+  // explicitly switches (design spec §3) — not a run-end snapshot.
+  this.lastWeapon = 'blade';
   this.maxHpBonus = 0;        // permanent +max HP, stacked one META_MAXHP_GAIN at a time
   this.enforceLocks = CFG.META_ENFORCE_LOCKS_DEFAULT;   // D4's own "debug-room toggle"
   // Ability enhancements (abilities spec §4) — four independent flat-cost
@@ -4979,6 +5000,9 @@ function sanitize(raw) {
       if (raw.unlocked[ids[i]] === true) out.unlocked[ids[i]] = true;
     }
   }
+  // D15: the same "validate against DATA.WEAPON_IDS, fall back to the
+  // safe default otherwise" pattern `unlocked` above already uses.
+  if (C.DATA.WEAPON_IDS.indexOf(raw.lastWeapon) !== -1) out.lastWeapon = raw.lastWeapon;
   return out;
 }
 
@@ -5343,6 +5367,29 @@ Sim.prototype.step = function () {
 
   var i, p, want = 0;
 
+  // 0. D15: weapon switch is consumed before attack input, so identity
+  //    resolves before action — a same-tick switch-then-attack combo
+  //    correctly swings with the newly-equipped weapon, zero added
+  //    latency. Consumed in the SIM layer, mirroring exactly how roll/
+  //    jump/parry/attack are already consumed inside Player.prototype.
+  //    update()/Combat.begin() below rather than in 95-app.js — that
+  //    split is what lets a test script pad.set() and step the sim
+  //    directly, with no fake DOM events.
+  //
+  //    Adversarially found: this loop originally consumed the press
+  //    regardless of alive() — the ONLY action in this file that would
+  //    have permanently destroyed a buffered press made during a
+  //    player's death animation instead of leaving it to decay/persist on
+  //    its own schedule, unlike attack (Combat.begin's own `if
+  //    (!player.alive()) return;`, checked BEFORE its own pad.buffered()
+  //    read) and jump/roll/parry (Player.prototype.update's own dead
+  //    early-return, which sits before every one of its own pad.consume()
+  //    calls). Guarded the identical way here.
+  for (i = 0; i < this.players.length; i++) {
+    p = this.players[i];
+    if (p.alive() && this.pads.get(i).consume('switchWeapon')) this.cycleWeapon(i);
+  }
+
   // 1. Attack input is consumed before anything moves, so a swing costs zero
   //    frames of latency for the same reason a jump does.
   for (i = 0; i < this.players.length; i++) {
@@ -5478,6 +5525,11 @@ Sim.prototype._applyMetaToPlayer = function (player) {
   player.parryRiposte = this.meta.parryRiposte;
   player.parryReflect = this.meta.parryReflect;
   if (this.meta.dashExtraCharge) player.dashCharges = 1;
+  // D15: reset to resetTransient()'s safe 'blade' baseline, then layer the
+  // permanent choice back on — the same two-step every other field in
+  // this method already uses.
+  player.weapon = MetaLogic.isUnlocked(this.meta, this.meta.lastWeapon)
+    ? this.meta.lastWeapon : 'blade';
 };
 
 // Loads a DIFFERENT meta state into an already-constructed Sim — a real
@@ -5598,6 +5650,57 @@ Sim.prototype.buyParryReflect = function () {
     if (p.alive()) p.parryReflect = true;
   }
   return true;
+};
+
+/* D15 (weapon equip & switch) — the real primitive. Same shape as
+ * buyMaxHp above: check preconditions, mutate, return success. Unlike a
+ * buyX purchase, this costs no currency and is always available once
+ * unlocked — a live gameplay action, not a shop transaction (design spec
+ * §4), which is also why it takes a playerIndex rather than applying
+ * uniformly to every player the way the buyX methods above do. */
+Sim.prototype.switchWeapon = function (playerIndex, weaponId) {
+  var player = this.players[playerIndex];
+  if (!player || !player.alive()) return false;
+  if (!player.canSwitchWeapon()) return false;
+  // Adversarially found: MetaLogic.isUnlocked() returns true unconditionally
+  // for ANY argument under Stage 1's own shipped default (enforceLocks
+  // false) — every pre-D15 caller only ever passed an id already known to
+  // be real (rollBlueprintDrop iterates DATA.WEAPON_IDS itself), so that
+  // contract was always safe until now. weaponId here is the first
+  // untrusted argument to reach isUnlocked — a real membership check,
+  // mirroring MetaLogic.sanitize()'s own DATA.WEAPON_IDS validation, is
+  // needed at this boundary too.
+  if (DATA.WEAPON_IDS.indexOf(weaponId) === -1) return false;
+  if (!MetaLogic.isUnlocked(this.meta, weaponId)) return false;
+  player.weapon = weaponId;
+  // Only player 0's switch updates the shared "what does a fresh run
+  // start on" value (design spec §3's own named judgment) — a co-op
+  // partner's live player.weapon is ordinary per-player state, untouched
+  // by this.
+  if (playerIndex === 0) this.meta.lastWeapon = weaponId;
+  this.bus.emit('weaponSwitch', { playerId: player.id, weaponId: weaponId });
+  return true;
+};
+
+// A thin wrapper — the only trigger v1 ships (design spec §4). Advances
+// to the next UNLOCKED id in DATA.WEAPON_IDS (already alphabetically
+// sorted, L4-deterministic), wrapping around. Terminates in at most
+// ids.length steps, including when the current weapon is the only
+// unlocked one — a safe no-op, never a crash or an infinite loop (a real,
+// reachable state: enforceLocks toggled true via F5 with nothing handed
+// in yet).
+Sim.prototype.cycleWeapon = function (playerIndex) {
+  var player = this.players[playerIndex];
+  if (!player) return false;
+  var ids = DATA.WEAPON_IDS;
+  var start = ids.indexOf(player.weapon);
+  if (start === -1) start = 0;
+  for (var step = 1; step <= ids.length; step++) {
+    var next = ids[(start + step) % ids.length];
+    if (next === player.weapon) return false;   // wrapped back to itself
+    if (MetaLogic.isUnlocked(this.meta, next)) return this.switchWeapon(playerIndex, next);
+  }
+  return false;
 };
 
 /* ------------------------------------------------------------ run loop
@@ -6257,6 +6360,13 @@ Sim.prototype.hash = function () {
     // Object.keys(this.meta.unlocked) — a plain object's own key order is
     // insertion-dependent, not a source of truth this hash can lean on.
     this.meta.currency, this.meta.maxHpBonus, this.meta.enforceLocks ? 1 : 0,
+    // D15: affects a FUTURE tick's reset (_applyMetaToPlayer) — the same
+    // "hash a value directly rather than trust it's a pure re-derivation"
+    // bar this.tube's own comment above already sets. No `=== undefined`
+    // guard needed here (unlike the per-player p.weapon hash line below) —
+    // this.meta always comes from MetaLogic.sanitize()/defaults(), never a
+    // bare unsanitized object.
+    this.meta.lastWeapon,
     // Ability enhancements (§4): all four decide FUTURE ticks (whether a
     // future dash/parry/stagger gets the enhanced behavior), the same
     // "affects later ticks" bar the three fields above already hold to.
@@ -7647,7 +7757,8 @@ var DEFAULT_KEYS = {
   jump: ['Space', 'KeyK'],
   roll: ['ShiftLeft', 'ShiftRight', 'KeyL'],
   attack: ['KeyJ'],
-  parry: ['KeyU']
+  parry: ['KeyU'],
+  switchWeapon: ['KeyI']
 };
 
 // A KeyboardEvent.code is always alphanumeric (ArrowLeft, Space, Digit1,
@@ -8727,7 +8838,12 @@ function saveMeta(meta) {
  * Standard gamepad mapping. Face button 0 jumps, 1 and 5 roll (B and RB, so
  * both thumb and shoulder work), 2 attacks, 3 parries (abilities spec §2b —
  * the next free face button, same grouping as the other three core actions),
- * dpad 12-15 and the left stick both steer.
+ * dpad 12-15 and the left stick both steer. Button 4 (LB) switches weapons
+ * (D15) — confirmed genuinely unused by anything else in this codebase
+ * before this. Only ever translates hardware into pad.set() calls, the
+ * exact same shape every other action here already uses — the actual
+ * consume-and-act decision lives in the SIM layer (Sim.prototype.step's
+ * own phase 0), never here, so a scripted test never needs a fake gamepad.
  * ======================================================================== */
 function pollGamepad(pad, gp) {
   if (!gp) return;
@@ -8741,6 +8857,7 @@ function pollGamepad(pad, gp) {
   pad.set('roll', !!((gp.buttons[1] && gp.buttons[1].pressed) || (gp.buttons[5] && gp.buttons[5].pressed)));
   pad.set('attack', !!(gp.buttons[2] && gp.buttons[2].pressed));
   pad.set('parry', !!(gp.buttons[3] && gp.buttons[3].pressed));
+  pad.set('switchWeapon', !!(gp.buttons[4] && gp.buttons[4].pressed));
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -8806,6 +8923,18 @@ function boot(canvas, hud, seed) {
   // a timer or every frame — _commitPendingLevel() only fires at a real
   // D4 "transition."
   sim.bus.on('runEnd', function () { saveMeta(sim.meta); });
+  // D15 (weapon equip & switch): meta.lastWeapon is a real, frequently-
+  // mutated, player-facing preference (Sim.prototype.switchWeapon writes
+  // it the instant player 0 switches) — unlike F5-F10's debug-only fields,
+  // it can be changed many times in an ordinary session with no run-end
+  // anywhere nearby. Without a dedicated save hook, this is the exact
+  // "mutated in memory but silently reverted by an ordinary reload" gap
+  // this file's own F5/F6 comment above already documents and fixed once
+  // for those two fields — adversarially found again here, fixed the same
+  // way: save immediately, gated to player 0's own switch (the only one
+  // that actually touches shared meta; a co-op partner's own live
+  // player.weapon is per-player and never persisted).
+  sim.bus.on('weaponSwitch', function (e) { if (e.playerId === sim.players[0].id) saveMeta(sim.meta); });
 
   // A silent practice dummy near spawn, before anything that fights back —
   // boot-path flavor, not part of 60-run.js's own roster (a Dummy is a
@@ -9243,6 +9372,8 @@ function boot(canvas, hud, seed) {
     if (gp.buttons[13] && gp.buttons[13].pressed) pad.set('down', true);
     // Same face button 3 pollGamepad's own co-op mapping uses for parry.
     if (gp.buttons[3] && gp.buttons[3].pressed) pad.set('parry', true);
+    // Same button 4 pollGamepad's own co-op mapping uses for switchWeapon (D15).
+    if (gp.buttons[4] && gp.buttons[4].pressed) pad.set('switchWeapon', true);
   }
 
   // Takes the View, not the raw canvas: it needs cssW, the LOGICAL width, to

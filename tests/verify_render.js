@@ -727,6 +727,48 @@ async function main() {
     s.eq('and the permanent bonus', metaAfterReload.maxHpBonus, 1);
     s.eq('and a freshly booted player actually reflects it', metaAfterReload.playerMaxHp, CFG.MAX_HP + 1);
 
+    // D15 (weapon equip & switch): switchWeapon is the FIRST real, non-
+    // debug-key player input that mutates permanent meta (meta.lastWeapon,
+    // via Sim.prototype.switchWeapon) — an adversarial pass found it had no
+    // matching save hook wired, the exact "mutated in memory but silently
+    // reverted by an ordinary reload" bug the F6 block above already
+    // documents and was fixed for once. Driven through the REAL KeyI key
+    // dispatch (05-input.js/90-settings.js's default binding), not a direct
+    // sim.switchWeapon() call, so this proves the actual player-facing
+    // input path, not just the underlying Sim method verify_meta.js already
+    // covers. Run while enforceLocks is still Stage 1's own default
+    // (false) — every weapon reads unlocked, so cycling needs no extra
+    // setup — deliberately BEFORE the F5 toggle below flips that.
+    // switchWeapon is Pad-routed (like jump/roll/attack/parry), not a raw
+    // synchronous e.code check the way F5/F6 are — the render loop needs
+    // to actually observe the press for at least one real tick before
+    // release, the same wait the KeyJ (attack) block above already needs.
+    await cdp.keyDown(client, sid, 'KeyI');
+    await waitForCondition(client, sid,
+      "window.CINDER_APP.sim.players[0].weapon !== 'blade'", 1000);
+    await cdp.keyUp(client, sid, 'KeyI');
+    const afterSwitch = await read(client, sid, `(function () {
+      var a = window.CINDER_APP;
+      var stored = JSON.parse(localStorage.getItem(${JSON.stringify(META_KEY)}));
+      return { weapon: a.sim.players[0].weapon, lastWeapon: a.sim.meta.lastWeapon,
+               storedLastWeapon: stored.lastWeapon };
+    })()`);
+    s.eq('KeyI actually cycles the real player\'s weapon', afterSwitch.weapon, 'daggers');
+    s.eq('and updates meta.lastWeapon immediately', afterSwitch.lastWeapon, 'daggers');
+    s.ok('and saves to localStorage immediately, not just on the next runEnd',
+      afterSwitch.storedLastWeapon === 'daggers', String(afterSwitch.storedLastWeapon));
+
+    await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
+    const bootedAfterSwitch = await waitForBoot(client, sid);
+    s.ok('the app reboots after a reload following a weapon switch', bootedAfterSwitch);
+    await cdp.sleep(150);
+    const weaponAfterReload = await read(client, sid, `(function () {
+      var a = window.CINDER_APP;
+      return { lastWeapon: a.sim.meta.lastWeapon, playerWeapon: a.sim.players[0].weapon };
+    })()`);
+    s.eq('the weapon switch survives a real reload — meta.lastWeapon', weaponAfterReload.lastWeapon, 'daggers');
+    s.eq('and a freshly booted player actually starts on it', weaponAfterReload.playerWeapon, 'daggers');
+
     // F5 (toggleEnforceLocks) — the other debug-key mutation the same gap
     // affected — proven the identical way.
     await cdp.keyDown(client, sid, 'F5');

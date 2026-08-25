@@ -252,6 +252,29 @@ Sim.prototype.step = function () {
 
   var i, p, want = 0;
 
+  // 0. D15: weapon switch is consumed before attack input, so identity
+  //    resolves before action — a same-tick switch-then-attack combo
+  //    correctly swings with the newly-equipped weapon, zero added
+  //    latency. Consumed in the SIM layer, mirroring exactly how roll/
+  //    jump/parry/attack are already consumed inside Player.prototype.
+  //    update()/Combat.begin() below rather than in 95-app.js — that
+  //    split is what lets a test script pad.set() and step the sim
+  //    directly, with no fake DOM events.
+  //
+  //    Adversarially found: this loop originally consumed the press
+  //    regardless of alive() — the ONLY action in this file that would
+  //    have permanently destroyed a buffered press made during a
+  //    player's death animation instead of leaving it to decay/persist on
+  //    its own schedule, unlike attack (Combat.begin's own `if
+  //    (!player.alive()) return;`, checked BEFORE its own pad.buffered()
+  //    read) and jump/roll/parry (Player.prototype.update's own dead
+  //    early-return, which sits before every one of its own pad.consume()
+  //    calls). Guarded the identical way here.
+  for (i = 0; i < this.players.length; i++) {
+    p = this.players[i];
+    if (p.alive() && this.pads.get(i).consume('switchWeapon')) this.cycleWeapon(i);
+  }
+
   // 1. Attack input is consumed before anything moves, so a swing costs zero
   //    frames of latency for the same reason a jump does.
   for (i = 0; i < this.players.length; i++) {
@@ -387,6 +410,11 @@ Sim.prototype._applyMetaToPlayer = function (player) {
   player.parryRiposte = this.meta.parryRiposte;
   player.parryReflect = this.meta.parryReflect;
   if (this.meta.dashExtraCharge) player.dashCharges = 1;
+  // D15: reset to resetTransient()'s safe 'blade' baseline, then layer the
+  // permanent choice back on — the same two-step every other field in
+  // this method already uses.
+  player.weapon = MetaLogic.isUnlocked(this.meta, this.meta.lastWeapon)
+    ? this.meta.lastWeapon : 'blade';
 };
 
 // Loads a DIFFERENT meta state into an already-constructed Sim — a real
@@ -507,6 +535,57 @@ Sim.prototype.buyParryReflect = function () {
     if (p.alive()) p.parryReflect = true;
   }
   return true;
+};
+
+/* D15 (weapon equip & switch) — the real primitive. Same shape as
+ * buyMaxHp above: check preconditions, mutate, return success. Unlike a
+ * buyX purchase, this costs no currency and is always available once
+ * unlocked — a live gameplay action, not a shop transaction (design spec
+ * §4), which is also why it takes a playerIndex rather than applying
+ * uniformly to every player the way the buyX methods above do. */
+Sim.prototype.switchWeapon = function (playerIndex, weaponId) {
+  var player = this.players[playerIndex];
+  if (!player || !player.alive()) return false;
+  if (!player.canSwitchWeapon()) return false;
+  // Adversarially found: MetaLogic.isUnlocked() returns true unconditionally
+  // for ANY argument under Stage 1's own shipped default (enforceLocks
+  // false) — every pre-D15 caller only ever passed an id already known to
+  // be real (rollBlueprintDrop iterates DATA.WEAPON_IDS itself), so that
+  // contract was always safe until now. weaponId here is the first
+  // untrusted argument to reach isUnlocked — a real membership check,
+  // mirroring MetaLogic.sanitize()'s own DATA.WEAPON_IDS validation, is
+  // needed at this boundary too.
+  if (DATA.WEAPON_IDS.indexOf(weaponId) === -1) return false;
+  if (!MetaLogic.isUnlocked(this.meta, weaponId)) return false;
+  player.weapon = weaponId;
+  // Only player 0's switch updates the shared "what does a fresh run
+  // start on" value (design spec §3's own named judgment) — a co-op
+  // partner's live player.weapon is ordinary per-player state, untouched
+  // by this.
+  if (playerIndex === 0) this.meta.lastWeapon = weaponId;
+  this.bus.emit('weaponSwitch', { playerId: player.id, weaponId: weaponId });
+  return true;
+};
+
+// A thin wrapper — the only trigger v1 ships (design spec §4). Advances
+// to the next UNLOCKED id in DATA.WEAPON_IDS (already alphabetically
+// sorted, L4-deterministic), wrapping around. Terminates in at most
+// ids.length steps, including when the current weapon is the only
+// unlocked one — a safe no-op, never a crash or an infinite loop (a real,
+// reachable state: enforceLocks toggled true via F5 with nothing handed
+// in yet).
+Sim.prototype.cycleWeapon = function (playerIndex) {
+  var player = this.players[playerIndex];
+  if (!player) return false;
+  var ids = DATA.WEAPON_IDS;
+  var start = ids.indexOf(player.weapon);
+  if (start === -1) start = 0;
+  for (var step = 1; step <= ids.length; step++) {
+    var next = ids[(start + step) % ids.length];
+    if (next === player.weapon) return false;   // wrapped back to itself
+    if (MetaLogic.isUnlocked(this.meta, next)) return this.switchWeapon(playerIndex, next);
+  }
+  return false;
 };
 
 /* ------------------------------------------------------------ run loop
@@ -1166,6 +1245,13 @@ Sim.prototype.hash = function () {
     // Object.keys(this.meta.unlocked) — a plain object's own key order is
     // insertion-dependent, not a source of truth this hash can lean on.
     this.meta.currency, this.meta.maxHpBonus, this.meta.enforceLocks ? 1 : 0,
+    // D15: affects a FUTURE tick's reset (_applyMetaToPlayer) — the same
+    // "hash a value directly rather than trust it's a pure re-derivation"
+    // bar this.tube's own comment above already sets. No `=== undefined`
+    // guard needed here (unlike the per-player p.weapon hash line below) —
+    // this.meta always comes from MetaLogic.sanitize()/defaults(), never a
+    // bare unsanitized object.
+    this.meta.lastWeapon,
     // Ability enhancements (§4): all four decide FUTURE ticks (whether a
     // future dash/parry/stagger gets the enhanced behavior), the same
     // "affects later ticks" bar the three fields above already hold to.
