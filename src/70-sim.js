@@ -842,10 +842,35 @@ Sim.prototype._buildCheckpointAlcove = function (gen) {
   var minX = Math.max(1, exitTileX - half);
   var maxX = Math.min(gen.world.w - 2, exitTileX + half);
 
+  // D17: a column at the exit's own row can now legitimately be a real,
+  // deliberately-placed TILE.HAZARD strip (flat-rise, same y as the exit
+  // platform) — nothing in `platforms` records a hazard strip, so
+  // _columnRisksClimbCeiling's own `p.y === exitTileY` "fine to widen" rule
+  // (it only ever looks at the platforms array) can't see it. Adversarially
+  // found, driven against real Gen.generate() output: without a guard, the
+  // alcove silently overwrites a hazard beat's own strip with SOLID
+  // whenever it lands on the exit's row, erasing the capability D17 just
+  // spent — never a fairness problem (SOLID is strictly easier than
+  // HAZARD), but a real, silent feature defeat.
+  //
+  // Deliberately checks for HAZARD specifically, not "must be EMPTY" — a
+  // first version required strict emptiness, which also stopped widening
+  // through a column that was already SOLID from some OTHER same-row
+  // platform (a real, common case _columnRisksClimbCeiling's own
+  // `p.y === exitTileY` rule already correctly treats as safe, and setting
+  // an already-solid tile to solid again is a harmless no-op) — a real
+  // regression, caught by an existing test (verify_run.js's "the full,
+  // ideal offset is real, reachable placement code" going 0/30 once the
+  // over-broad guard made the ideal-offset branch unreachable). Only
+  // HAZARD is the new case with no platforms-array representation; every
+  // other tile kind's safety is exactly what _columnRisksClimbCeiling
+  // already decides, unchanged.
   var x1 = exitTileX;
-  while (x1 < maxX && !_columnRisksClimbCeiling(gen.platforms, x1 + 1, exitTileY)) x1++;
+  while (x1 < maxX && gen.world.get(x1 + 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x1 + 1, exitTileY)) x1++;
   var x0 = exitTileX;
-  while (x0 > minX && !_columnRisksClimbCeiling(gen.platforms, x0 - 1, exitTileY)) x0--;
+  while (x0 > minX && gen.world.get(x0 - 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x0 - 1, exitTileY)) x0--;
   for (var x = x0; x <= x1; x++) gen.world.set(x, exitTileY, World.TILE.SOLID);
 
   var needed = CFG.TUBE_OFFSET_X;

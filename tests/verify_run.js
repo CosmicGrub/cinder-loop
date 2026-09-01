@@ -199,7 +199,13 @@ const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA, Gen = C.Ge
   for (let seed = 1; seed <= N; seed++) {
     const gen = Gen.generate(seed, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS });
     const exitIdx = gen.platforms.length - 1 - gen.pickups.length;
-    const edges = Gen.buildGraph(gen.platforms);
+    // D17: pass hazardEdges through — otherwise a room where the ONLY
+    // approach to the exit is a hazard-beat crossing would never appear in
+    // `approaches` at all, exactly the blind spot that let a real
+    // interaction bug (the checkpoint alcove silently erasing a hazard
+    // strip on the exit's own row, fixed in _buildCheckpointAlcove above)
+    // ship with this suite fully green.
+    const edges = Gen.buildGraph(gen.platforms, gen.hazardEdges);
     const approaches = [];
     for (let i = 0; i < gen.platforms.length; i++) {
       if (i !== exitIdx && edges[i].indexOf(exitIdx) !== -1) approaches.push(i);

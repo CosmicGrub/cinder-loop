@@ -341,6 +341,10 @@ var CFG = {
   GEN_DBLJUMP_HIGH_MIN_GAP_TILES: 2,
   GEN_MAX_RISE_TILES: 5,     // no generated beat may ever ask for more rise than this
   GEN_ROLL_HAZARD_TILES: 4,  // ground-level hazard strip crossable via roll: measured 85.5px = 5.34 tiles
+  // D17: per-beat roll to place a hazard beat instead of a normal one,
+  // capped at one per generated candidate (50-gen.js) — see that file's
+  // own hazardEdgeAllowed/placeHazardBeat for the mechanism.
+  GEN_HAZARD_BEAT_CHANCE: 0.15,
 
   GEN_MIN_FIGHT_TILES: 4,    // design judgment, not a measurement — see above
 
@@ -1308,6 +1312,14 @@ function Body(x, y, w, h) {
   this.onCeiling = false;
   this.onWall = 0;          // -1 touching a wall to the left, +1 to the right
   this.dropThrough = 0;     // frames remaining of ignoring one-way platforms
+  // D17: a bounded moveX exemption for a body that just left solid ground
+  // horizontally with no upward velocity (a grounded Roll) — see moveX's
+  // own comment below for the mechanism, and 30-player.js's roll-entry/
+  // endRoll for the only place that ever arms/disarms these. Inert for
+  // every other body (enemies, the player in any other state): nothing
+  // else in the codebase ever sets wallLeniency true.
+  this.wallLeniency = false;
+  this.leaveRow = -1;       // the tile row wallLeniency is scoped to, or -1
 }
 
 Body.prototype.bottom = function () { return this.y + this.h; };
@@ -1337,6 +1349,18 @@ function moveX(body, world, dx) {
       // One-way platforms are floors, never walls. Blocking X on them turns
       // every ledge into a shelf you get stuck against.
       if (world.get(tx, ty) !== TILE.SOLID) continue;
+      // D17: a body mid-roll gets a bounded exemption on the exact row it
+      // just left. Without this, ordinary axis-separated resolution (X
+      // fully, then Y) blocks a flat-rise roll on the far platform's own
+      // wall before Y ever gets a chance to land it — a roll starts with
+      // zero vertical velocity flush against the ground, so gravity sinks
+      // its own hitbox into this row within 1-2 ticks, long before it can
+      // have crossed a real gap horizontally. Scoped to ONE row only (a
+      // multi-row-tall wall's other rows still block normally) and to
+      // however long wallLeniency stays armed (roll's own duration) — see
+      // 30-player.js's roll-entry/endRoll, the only place that ever sets
+      // this true/false.
+      if (body.wallLeniency && ty === body.leaveRow) continue;
       if (dx > 0) {
         body.x = tx * CFG.TILE - body.w;
       } else if (dx < 0) {
@@ -1536,6 +1560,11 @@ Player.prototype.resetTransient = function () {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -1675,6 +1704,11 @@ Player.prototype.teleport = function (x, y) {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -1962,6 +1996,12 @@ Player.prototype.update = function (pad, world, bus) {
       // frame is a free nineteenth frame and the distance overshoots.
       this.rollFrames = CFG.ROLL_FRAMES - 1;
       this.rollFrom = b.x;
+      // D17: arm the moveX wall-leniency (25-body.js) on the exact row
+      // this roll is departing from, while the body is still flush
+      // grounded — see that file's own comment for the mechanism. Cleared
+      // in endRoll(), below, so the exemption can never outlive this roll.
+      b.leaveRow = world.tileY(b.bottom());
+      b.wallLeniency = true;
       if (!this.crouching) { this.crouching = true; b.setHeight(CFG.PLAYER_CROUCH_H); }
       b.vx = this.facing * CFG.ROLL_SPEED;
       // Gravity on the start frame too. Without it vy is 0, moveY never runs,
@@ -2160,6 +2200,11 @@ Player.prototype.finish = function (world, bus, wasGrounded, axis) {
 Player.prototype.endRoll = function (world, bus) {
   var b = this.body;
   this.rollCd = CFG.ROLL_COOLDOWN_FRAMES;
+  // D17: disarm the wall-leniency the instant the roll that armed it ends
+  // — the exemption must never outlive its own roll (30-player.js's own
+  // roll-entry block is the only place this is ever set true).
+  b.wallLeniency = false;
+  b.leaveRow = -1;
   // Stand back up if there is room; a low ceiling keeps you crouched rather
   // than teleporting you into it.
   if (b.canStand(world, CFG.PLAYER_H)) {
@@ -4266,18 +4311,59 @@ function edgeAllowed(from, to) {
   return cap >= 0 && gap <= cap && gap >= minGapForRise(rise);
 }
 
+/* D17: a hazard-beat edge is a genuinely different capability from a jump
+ * edge, not a variant of one — deliberately its own function rather than
+ * folded into edgeAllowed above, the same way this file's own header
+ * comment on edgeAllowed already names the risk of conflating two
+ * different capabilities into one test (an earlier undirected version of
+ * edgeAllowed let a valid drop silently license the reverse climb — a
+ * real, already-fixed bug this file learned from once).
+ *
+ * Flat-rise only: 30-player.js's Roll keeps accumulating gravity even off
+ * a ledge, so any real rise risks the roll falling short of a higher
+ * target or overshooting a lower one — neither is measured, so this stays
+ * out of scope (see the D17 spec's own §1). Symmetric, unlike edgeAllowed:
+ * since rise is always 0 here, roll-crossability is genuinely the same in
+ * both directions — buildGraph, below, adds a valid hazard edge to the
+ * graph in both directions for exactly this reason. */
+function hazardEdgeAllowed(a, b) {
+  if (a.y !== b.y) return false;
+  var gap = gapBetween(a, b);
+  return gap > CFG.GEN_FLAT_GAP_TILES && gap <= CFG.GEN_ROLL_HAZARD_TILES;
+}
+
 /* ------------------------------------------------------------------ graph
  * Plain data in, plain data out — no World, no tiles, so this half of the
  * audit is testable with hand-built platform lists and nothing else.
  * DIRECTED: edges[i] lists every j reachable FROM i, which is not generally
  * the same set as what can reach i. */
-function buildGraph(platforms) {
+function buildGraph(platforms, hazardEdges) {
   var n = platforms.length, edges = [], i, j;
   for (i = 0; i < n; i++) edges.push([]);
   for (i = 0; i < n; i++) {
     for (j = 0; j < n; j++) {
       if (i === j) continue;
       if (edgeAllowed(platforms[i], platforms[j])) edges[i].push(j);
+    }
+  }
+  // D17: each recorded hazard-beat pair is independently RE-VALIDATED here
+  // via hazardEdgeAllowed — never trusting the generator's own bookkeeping
+  // that a pair it MEANT to place as a valid hazard beat actually is one.
+  // "THE AUDIT IS THE POINT" (this file's own header) applies exactly as
+  // much to a hazard edge as to a jump edge. Added BOTH directions,
+  // deliberately unlike the directed main loop just above — hazardEdgeAllowed
+  // is symmetric by construction (flat-rise only), so the reverse crossing
+  // is exactly as real as the forward one. Do NOT "fix" this to be
+  // directed to match edgeAllowed's own model: that model is directed
+  // specifically because climbing and dropping are asymmetric capabilities,
+  // a distinction that does not exist when rise is 0.
+  if (hazardEdges) {
+    for (i = 0; i < hazardEdges.length; i++) {
+      var hi = hazardEdges[i][0], hj = hazardEdges[i][1];
+      if (hazardEdgeAllowed(platforms[hi], platforms[hj])) {
+        edges[hi].push(hj);
+        edges[hj].push(hi);
+      }
     }
   }
   return edges;
@@ -4312,7 +4398,7 @@ function reachableFrom(edges, startIdx) {
  * audit() only ever reads and reports. */
 function audit(candidate) {
   var platforms = candidate.platforms;
-  var edges = buildGraph(platforms);
+  var edges = buildGraph(platforms, candidate.hazardEdges);
   var reach = reachableFrom(edges, candidate.spawnIdx);
   var reasons = [];
 
@@ -4335,6 +4421,33 @@ function audit(candidate) {
     if (width < CFG.GEN_MIN_FIGHT_TILES) {
       reasons.push('platform ' + i + ' is ' + width + ' tiles wide, under the ' +
         CFG.GEN_MIN_FIGHT_TILES + '-tile fightable minimum');
+    }
+  }
+
+  // D17: no OTHER platform's own footprint may overlap a hazard beat's
+  // stamped gap span. stamp() (below) overwrites that exact row with
+  // TILE.HAZARD; placeSpur has no awareness of hazardEdges and can anchor a
+  // spur (including a pickup-bearing one) inside that span, which reach[]
+  // above would still certify reachable — it was computed from PRE-stamp
+  // geometry, before the spur's own solid ground silently became hazard.
+  // Adversarially found (real generated output, not a hypothetical): this
+  // happens in roughly one in twenty candidates that place a hazard beat at
+  // all. Checked here, not patched at stamp() time, so an unsafe candidate
+  // is rejected and regenerated instead — "the audit is the point" applies
+  // exactly as much to this as to reachability or fight-width.
+  if (candidate.hazardEdges) {
+    for (i = 0; i < candidate.hazardEdges.length; i++) {
+      var he = candidate.hazardEdges[i];
+      var hazFrom = platforms[he[0]], hazTo = platforms[he[1]];
+      var haz0 = hazFrom.x1 + 1, haz1 = hazTo.x0 - 1;
+      for (var k = 0; k < platforms.length; k++) {
+        if (k === he[0] || k === he[1]) continue;
+        var pk = platforms[k];
+        if (pk.y !== hazFrom.y) continue;
+        if (pk.x1 >= haz0 && pk.x0 <= haz1) {
+          reasons.push('platform ' + k + ' overlaps hazard beat [' + he[0] + ',' + he[1] + ']\'s own gap span');
+        }
+      }
     }
   }
 
@@ -4387,6 +4500,26 @@ function placeMainBeat(rng, platforms, cursorX, cursorY) {
   return p;
 }
 
+/* D17: a beat spending CFG.GEN_ROLL_HAZARD_TILES — a gap strictly wider
+ * than a normal jump can cross (GEN_FLAT_GAP_TILES) but within Roll's own
+ * measured reach. Flat rise only, enforced at the call site (no rise
+ * parameter at all) rather than merely in hazardEdgeAllowed's own check.
+ * `gap`'s formula only ever evaluates to exactly GEN_ROLL_HAZARD_TILES
+ * today (the valid range (GEN_FLAT_GAP_TILES, GEN_ROLL_HAZARD_TILES] has
+ * exactly one integer in it at current CFG values) — written as a formula
+ * rather than a literal so it stays correct if either constant is ever
+ * retuned. */
+function placeHazardBeat(rng, platforms, cursorX, cursorY) {
+  var gap = CFG.GEN_FLAT_GAP_TILES + 1 +
+    rng.int(CFG.GEN_ROLL_HAZARD_TILES - CFG.GEN_FLAT_GAP_TILES);
+  var width = CFG.GEN_MIN_FIGHT_TILES + rng.int(6);
+  var newX0 = cursorX + 1 + gap;
+  var kind = rng.next() < 0.18 ? TILE.ONEWAY : TILE.SOLID;
+  var p = { x0: newX0, x1: newX0 + width - 1, y: cursorY, kind: kind, spur: false };
+  platforms.push(p);
+  return p;
+}
+
 // A short side alcove branching off an existing platform — up or down,
 // left or right — reachable only via its own capability-constrained hop,
 // which is what makes "reachable to every pickup" a genuine question for
@@ -4421,8 +4554,31 @@ function generateCandidate(rng, opts) {
   platforms.push(start);
 
   var cursor = start, i;
+  // D17: capped at one hazard beat per candidate via hazardPlaced.
+  var hazardEdges = [], hazardPlaced = false;
   for (i = 0; i < beats; i++) {
-    cursor = placeMainBeat(rng, platforms, cursor.x1, cursor.y);
+    // Always drawn, regardless of whether the cap is already spent or this
+    // beat is excluded by position below — the RNG stream must stay
+    // identical regardless of WHEN (or whether) the hazard beat lands
+    // (L4), the same reasoning `risky` already follows in placeMainBeat/
+    // placeSpur. Adversarially found: an earlier version gated the draw
+    // itself behind `!hazardPlaced &&`, which SHORT-CIRCUITS in JS — every
+    // beat after a candidate's own hazard placement silently consumed one
+    // fewer RNG draw than this comment claims, a real bug the review
+    // caught by diffing against a hoisted-roll variant on real seeds.
+    var hazardRoll = rng.next() < CFG.GEN_HAZARD_BEAT_CHANCE;
+    // Excluded from the very first beat (would be the player's first
+    // action off spawn, with zero warm-up) and the very last (would gate
+    // the exit behind a blind hazard crossing) — also adversarially found,
+    // not part of the original design.
+    if (!hazardPlaced && hazardRoll && i > 0 && i < beats - 1) {
+      var beforeIdx = platforms.length - 1;
+      cursor = placeHazardBeat(rng, platforms, cursor.x1, cursor.y);
+      hazardEdges.push([beforeIdx, platforms.length - 1]);
+      hazardPlaced = true;
+    } else {
+      cursor = placeMainBeat(rng, platforms, cursor.x1, cursor.y);
+    }
   }
   var exitIdx = platforms.length - 1;
 
@@ -4440,7 +4596,7 @@ function generateCandidate(rng, opts) {
     });
   }
 
-  return { platforms: platforms, spawnIdx: 0, exitIdx: exitIdx, pickups: pickups };
+  return { platforms: platforms, spawnIdx: 0, exitIdx: exitIdx, pickups: pickups, hazardEdges: hazardEdges };
 }
 
 /* ---------------------------------------------------------------- stamp
@@ -4471,6 +4627,14 @@ function stamp(candidate, rng) {
   // hand-built demo level's own pit is never a silent free fall (masterfile
   // §"honest state": falling costs a heart, it is not a teleport to spawn).
   for (var x2 = 0; x2 < w; x2++) world.set(x2, deathRow, TILE.HAZARD);
+  // D17: one row of HAZARD per recorded hazard beat, spanning the gap
+  // between its two platforms — mirrors the death-row convention just
+  // above at the scale of one gap instead of the whole level width.
+  for (var hIdx = 0; hIdx < candidate.hazardEdges.length; hIdx++) {
+    var he = candidate.hazardEdges[hIdx];
+    var pa = platforms[he[0]], pb = platforms[he[1]];
+    for (var hx = pa.x1 + 1; hx <= pb.x0 - 1; hx++) world.set(hx, pa.y, TILE.HAZARD);
+  }
   for (var y = 0; y < h; y++) { world.set(0, y, TILE.SOLID); world.set(w - 1, y, TILE.SOLID); }
 
   var spawnP = platforms[candidate.spawnIdx];
@@ -4517,7 +4681,8 @@ function generate(seed, opts) {
     world: stamped.world, spawn: stamped.spawn, exit: stamped.exit, pickups: stamped.pickups,
     attempts: attempts, rejected: rejected,
     rejectionRate: rejected / attempts,
-    platforms: candidate.platforms
+    platforms: candidate.platforms,
+    hazardEdges: candidate.hazardEdges
   };
 }
 
@@ -4531,6 +4696,7 @@ C.Gen = {
   minGapForRise: minGapForRise,
   gapBetween: gapBetween,
   edgeAllowed: edgeAllowed,
+  hazardEdgeAllowed: hazardEdgeAllowed,
   stamp: stamp
 };
 
@@ -6120,10 +6286,35 @@ Sim.prototype._buildCheckpointAlcove = function (gen) {
   var minX = Math.max(1, exitTileX - half);
   var maxX = Math.min(gen.world.w - 2, exitTileX + half);
 
+  // D17: a column at the exit's own row can now legitimately be a real,
+  // deliberately-placed TILE.HAZARD strip (flat-rise, same y as the exit
+  // platform) — nothing in `platforms` records a hazard strip, so
+  // _columnRisksClimbCeiling's own `p.y === exitTileY` "fine to widen" rule
+  // (it only ever looks at the platforms array) can't see it. Adversarially
+  // found, driven against real Gen.generate() output: without a guard, the
+  // alcove silently overwrites a hazard beat's own strip with SOLID
+  // whenever it lands on the exit's row, erasing the capability D17 just
+  // spent — never a fairness problem (SOLID is strictly easier than
+  // HAZARD), but a real, silent feature defeat.
+  //
+  // Deliberately checks for HAZARD specifically, not "must be EMPTY" — a
+  // first version required strict emptiness, which also stopped widening
+  // through a column that was already SOLID from some OTHER same-row
+  // platform (a real, common case _columnRisksClimbCeiling's own
+  // `p.y === exitTileY` rule already correctly treats as safe, and setting
+  // an already-solid tile to solid again is a harmless no-op) — a real
+  // regression, caught by an existing test (verify_run.js's "the full,
+  // ideal offset is real, reachable placement code" going 0/30 once the
+  // over-broad guard made the ideal-offset branch unreachable). Only
+  // HAZARD is the new case with no platforms-array representation; every
+  // other tile kind's safety is exactly what _columnRisksClimbCeiling
+  // already decides, unchanged.
   var x1 = exitTileX;
-  while (x1 < maxX && !_columnRisksClimbCeiling(gen.platforms, x1 + 1, exitTileY)) x1++;
+  while (x1 < maxX && gen.world.get(x1 + 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x1 + 1, exitTileY)) x1++;
   var x0 = exitTileX;
-  while (x0 > minX && !_columnRisksClimbCeiling(gen.platforms, x0 - 1, exitTileY)) x0--;
+  while (x0 > minX && gen.world.get(x0 - 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x0 - 1, exitTileY)) x0--;
   for (var x = x0; x <= x1; x++) gen.world.set(x, exitTileY, World.TILE.SOLID);
 
   var needed = CFG.TUBE_OFFSET_X;
