@@ -118,26 +118,26 @@
 <header>
   <h1>CINDER LOOP</h1>
   <div class="sub">Visual map &middot; companion to CINDER_LOOP_MASTERFILE.md and CINDER_LOOP_CHANGELOG.md</div>
-  <div class="status">v0.2.21 &middot; 2026-08-25 &middot; GREEN 2611/2611 &middot; Checkpoint narration &mdash; 82-narrative.js finally subscribes to 'checkpoint' (D21)</div>
+  <div class="status">v0.2.22 &middot; 2026-08-31 &middot; GREEN 2654/2654 &middot; Roll-crossable hazard beats + the roll wall-leniency prerequisite (D17)</div>
 </header>
 
 <h2>Module stack &mdash; strict one-way dependency</h2>
 <div class="stack">
-  <div class="row"><span class="file">00-core.js</span><span class="what">RNG (per-instance seeded) &middot; Bus (typed) &middot; CFG (every tunable) &middot; math, room/checkpoint/cinders CFG + checkpoint/cinder EVENTS (D14), weaponSwitch EVENT (D15)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">00-core.js</span><span class="what">RNG (per-instance seeded) &middot; Bus (typed) &middot; CFG (every tunable) &middot; math, room/checkpoint/cinders CFG + checkpoint/cinder EVENTS (D14), weaponSwitch EVENT (D15), GEN_HAZARD_BEAT_CHANCE (D17)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">05-input.js</span><span class="what">Pad / Pads &mdash; N-player array, first-press-safe edges, pending buffer, parry button + WINDOW entry (D13), switchWeapon button + WINDOW entry (D15)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">10-data.js</span><span class="what">tables: enemy roster (D9, 4 templates), weapons (D7/D9, 4 &mdash; roster complete). grafts still to come, DIALOGUE.narrator.checkpoint pool (D21)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">20-world.js</span><span class="what">tilemap: empty / solid / one-way / hazard + queries</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">25-body.js</span><span class="what">AABB, axis-separated collision, sub-stepped, one-way + drop-through</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">30-player.js</span><span class="what">run, jump, double jump, wall slide/jump, ledge grab/mantle, roll, crouch, slam, hazards, death, respawn, D2 stats + gainStat(), Ember Dash + Parry window (D13), canSwitchWeapon() (D15)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">25-body.js</span><span class="what">AABB, axis-separated collision, sub-stepped, one-way + drop-through, wallLeniency/leaveRow roll wall-exemption (D17)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">30-player.js</span><span class="what">run, jump, double jump, wall slide/jump, ledge grab/mantle, roll, crouch, slam, hazards, death, respawn, D2 stats + gainStat(), Ember Dash + Parry window (D13), canSwitchWeapon() (D15), roll-entry arms wallLeniency (D17)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">35-rig.js</span><span class="what">skeletal poses, hitbox bake at boot, overreach audit (L9, D6)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">40-combat.js</span><span class="what">attack machine, hit resolution, combos, cancels, hitstop policy, D2 weapon scaling, slam impact, parry negate+stagger + Riposte/Reflect hooks (D13)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">45-enemy.js</span><span class="what">enemy entities, per-instance-seeded brains, the fairness rule, stagger() + 'staggered' state (D13), 'summon' case + callIn()/doSummon() (D16)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">50-gen.js</span><span class="what">procedural generator + fairness audit (D3a)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">50-gen.js</span><span class="what">procedural generator + fairness audit (D3a), hazardEdgeAllowed/placeHazardBeat + bidirectional hazard edges (D17)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">55-boss.js</span><span class="what">Kilnwarden &mdash; two-phase boss + arena, kept OUT of DATA.ENEMIES (D9)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">56-caller.js</span><span class="what">the Caller &mdash; elite 'summon' template, kept OUT of DATA.ENEMIES the same way Kilnwarden is (D16)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">60-run.js</span><span class="what">run loop: spawn &rarr; clear &rarr; boss &rarr; death &rarr; spend &rarr; respawn (D1), room chain: roomIndex + deriveRoomSeed (D14)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">65-meta.js</span><span class="what">persistence, blueprints, +max HP capability unlock (D4/D8), four Dash/Parry enhancement flags (D13), lastWeapon (D15)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16), _buildCheckpointAlcove stops at TILE.HAZARD (D17)</span><span class="tag">BUILT</span></div>
   <div class="boundary"><span>PRESENTER BOUNDARY &mdash; L5</span><i>.</i><span>nothing above may know anything below</span></div>
   <div class="row"><span class="file">80-view.js</span><span class="what">the ONLY place an event becomes an effect: renderer, camera rig, particles, dashStart/parry bursts + per-player parryGlow (D13)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12), 'checkpoint' subscription (D21)</span><span class="tag">BUILT</span></div>

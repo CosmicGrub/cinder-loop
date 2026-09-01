@@ -281,6 +281,7 @@ measurement of the code that is actually on disk.
 | D14 | A level becomes a linear chain of `CFG.ROOM_COUNT` (3) procedurally-generated combat rooms plus the existing boss room — not a branching graph, not hand-authored combat content — reusing the exact mid-run teardown-and-reload shape `_enterLevel()`/`_enterBoss()` already established via a new `Sim.prototype._enterRoom(i)` called in a loop instead of once, each room independently fairness-audited by the same D3a machinery at smaller `CFG.ROOM_BEATS`/`ROOM_PICKUPS` dimensions and its own `RunLogic.deriveRoomSeed`-derived seed. A checkpoint fires the instant a room's roster clears (`_onRoomClear()`), deliberately decoupled from reaching the room's own exit — `_healAtCheckpoint()` (a fraction of MISSING hp, never a flat number) and `_handInCarriedBlueprints()` (a helper extracted out of `_commitPendingLevel()` so the SAME hand-in logic now fires at every checkpoint, not just true run-end) both land immediately, giving the player a real, player-paced window to act before the door itself unlocks. Death still ends the whole run exactly as D1 defines it — no mid-run "continue," a hybrid explicitly chosen over a bonfire/save-crystal model. Cinders (a second, riskier income stream into the same `meta.currency` pool, D8) are scoped and reserved for the mechanic's own follow-up — `CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` and three Bus events (`cinderDrop`/`cinderLost`/`cinderBanked`) exist, and the tube's own physical anchor point is real and reachability-audited (`_buildCheckpointAlcove()`) — but the drop/carry/bank mechanic itself (`player.carriedCinders`, a drop-on-kill roll, a bank-at-tube interaction) has no wired implementation yet; named honestly in §5q, not silently claimed complete. | rooms give a level real internal pacing (Dead Cells/Castlevania/Hollow Knight-style structure) without touching D1's own locked run-loop identity — reusing `_enterLevel()`'s existing shape was the single biggest risk-reducer available, over inventing new machinery; decoupling checkpoint-fires-on-clear from advance-fires-on-clear-AND-exit is what actually earns a real decision point rather than an invisible auto-save |
 | D15 | `player.weapon` goes live for the first time since v0.2.8. `Sim.prototype.switchWeapon(playerIndex, weaponId)` is the real primitive — validates `player.alive()`, `canSwitchWeapon()`, and `DATA.WEAPON_IDS` membership before consulting `MetaLogic.isUnlocked` — gated on `!player.attack`, a correctness requirement rather than a feel choice: `Combat.step` re-reads `player.weapon` every tick an attack resolves (`Combat.weaponScale`, `40-combat.js:302-313`), so a mid-swing switch would silently reweight an in-flight move's damage using the new weapon's stat-colour pair instead of the one the move actually belongs to. `Sim.prototype.cycleWeapon(playerIndex)` is the thin wrapper the one v1 input trigger (gamepad button 4 / `KeyI`) actually calls, consumed in a new phase 0 of `Sim.prototype.step` — before attack input, so a same-tick switch-then-swing combo correctly attacks with the newly-equipped weapon — in the SIM layer, not the presenter, matching every other action already consumed there. `meta.lastWeapon` is captured immediately inside `switchWeapon()` itself, on player 0's own explicit switch, deliberately NOT a run-end snapshot — reading the real reset-timing source found a run-end capture would need a second, `blueprintLost`-style timing hook to handle a player-0 death correctly, real avoidable complexity a capture-on-switch design sidesteps entirely. | this is the single largest already-built-but-inert surface in the game closing at once — D9's four weapons and D2's entire per-weapon colour-scaling axis have been dead build-diversity from a player's perspective since v0.2.8; gating on attack-state alone is both necessary and sufficient because `player.weapon` is read nowhere else, so no second, broader lock is needed |
 | D16 | A fifth enemy attack primitive, `attack: 'summon'`, realized as exactly one elite template — the Caller (`src/56-caller.js`, kept OUT of `DATA.ENEMIES`/`ENEMY_IDS` the same way Kilnwarden is, D9's roster staying hard-pinned at four). `Enemy.prototype.doTelegraph`'s attack switch (`45-enemy.js:396`) gains `case 'summon': this.callIn(ctx); this.enter('summon'); break;`, and `'summon'` gets its own real post-commit state — `Enemy.prototype.doSummon` (`45-enemy.js:502`), a near-copy of `'shoot'`'s own `doShoot()` — rather than falling straight to `'recover'`, a correction over the original pitch that would have made the Caller uniquely safe the instant it commits, unlike every other primitive in the game. `Enemy.prototype.callIn` (`45-enemy.js:452`) calls a real, independent Ashwalker into the fight through a new `ctx.addEnemy` bridge (`70-sim.js:87`, a two-line mirror of the existing `addShot`), gated by `this.summonsUsed >= m.summonMax` — a LIFETIME cap across the whole encounter, not a per-cast budget, reset in `resetTransient()` alongside every other per-life field. Summoned adds are excluded from room-clear/kill-currency by the SAME existing `_levelRosterIds` mechanism that already excludes the boot-path practice Dummy — no new exclusion logic needed. Reachable for v1 only via a new debug key, `F11` (`95-app.js`). | D9's own framing already priced this: "the engine knows four movement/attack primitives... a fifth archetype costs one new primitive" (`45-enemy.js`'s own header) — this is that fifth primitive, and `Sim.prototype.addEnemy` (`70-sim.js`) already existed, real and tested, making it nearly free to add on top of already-proven infrastructure rather than new machinery. A dedicated adversarial-verification pass (4 lenses, 17 raw findings, 21 confirmed after consolidating duplicates) found and fixed 5 real production bugs before this shipped — including a terrain-blind spawn offset that could climb a summoned add up through solid rock (the original design's own claim that "gravity resolves it" was false for a room's own full-height boundary walls) and a `summonsUsed` field excluded from `Sim.prototype.hash()` despite its own comment's claim of parity with `activeMove`/`phase` — proof the adversarial-verification discipline earns its keep on a feature this size, not a formality |
+| D17 | Two coupled pieces. (1) The physics prerequisite: `Body.prototype.wallLeniency`/`leaveRow` (`25-body.js:32-39`) — a bounded `moveX` exemption (`25-body.js:69-80`), armed only by `Player`'s own grounded-roll-entry code for the exact tile row a roll departs from (`30-player.js:547-552`) and disarmed the instant that specific roll ends (`endRoll`, `30-player.js:751-755`) — fixes a real collision-model gap verified empirically during implementation, not assumed: axis-separated collision (X resolves fully before Y every sub-step) blocks ANY flat-rise roll from ever landing on a far platform, at any gap size, because a roll starts at zero vertical velocity flush against the ground and sinks into the shared row within 1-2 ticks, before it can have crossed the gap horizontally — the originally-approved design's own distance-margin-only reasoning was false by itself. Roll-only, not Dash (Dash only ever triggers airborne); structurally inert for every enemy, since no `'roll'`/`'dash'` state exists anywhere in `45-enemy.js`. (2) Hazard beats: `CFG.GEN_HAZARD_BEAT_CHANCE` (0.15) is a per-beat roll in `generateCandidate`'s main loop (`50-gen.js`), capped at one per candidate and excluded from the first/last beat, spending `CFG.GEN_ROLL_HAZARD_TILES` — a real, measured capability constant with zero prior consumers — to place a flat-rise gap wider than a normal jump can cross but within Roll's own reach. `hazardEdgeAllowed(a,b)` validates it, deliberately its own function rather than folded into `edgeAllowed`; `buildGraph` gains an optional second parameter that independently re-validates and adds each recorded hazard edge BIDIRECTIONALLY, unlike the directed jump-edge graph, since flat-rise roll-crossability is symmetric by construction; `audit()` also rejects a candidate where any OTHER platform's own footprint would overlap a hazard beat's stamped gap span. A dedicated adversarial pass — including a real cross-feature interaction with D14's checkpoint alcove, which could silently overwrite a hazard strip with SOLID ground — found and fixed 5 real production bugs plus 2 test-coverage gaps before this shipped. | `CFG.GEN_ROLL_HAZARD_TILES` has been a real, measured number with zero consumers since it was written — this spends it, turning Roll into a genuine capability the generator actually asks for rather than only a defensive i-frame move; the wall-leniency fix is a real, previously-unknown collision-model gap this project's own physics-first verification standard caught before it shipped as a broken feature, not a design preference |
 | D21 | `82-narrative.js` finally subscribes to `'checkpoint'` (`bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });`, `82-narrative.js:126`) — the real Bus event D14's own `Sim.prototype._onRoomClear()` (`70-sim.js:1071`) already fires, with a declared consumer (D11's own reserved surface) that was never wired up until now. One new `DIALOGUE.narrator.checkpoint` line pool (`10-data.js`), sibling to `levelStart`/`bossEntry`/`reveal`/`bossVictory`/`death`. Zero new CFG, zero new Bus event, zero sim-file change — no branching on the payload's `healed`/`handedIn` fields, a single generic pool fires regardless, a named judgment resolved with the user over a two-pool tiered version (`checkpoint`/`checkpointFinal`) specifically to avoid `82-narrative.js` importing `CFG` for the first time in its history. | the cheapest system on the post-D13 roadmap, and correctly sequenced first in the revised Tier 1 — completes a declared-but-unbuilt half of D11 rather than opening a new design surface; preserving this file's zero-CFG-dependency purity was judged worth more than the modest texture gain a tiered pool would add |
 
 All remaining design answers take the ★ defaults recorded in the phased answer sheet.
@@ -1482,7 +1483,16 @@ only through a new `F11` debug key, real procedural placement named and
 explicitly deferred. **Since v0.2.21:** checkpoint narration (D21, §5t)
 — `82-narrative.js` subscribes to the `'checkpoint'` event D14 already
 fires, real and reading a genuine room-clear moment for the first time
-since that event's own reservation.
+since that event's own reservation. **Since v0.2.22:** roll-crossable
+hazard beats and the roll wall-leniency prerequisite (D17, §5u) — Roll
+gains a real, physics-verified capability to cross a flat-rise gap wider
+than a jump can clear (a genuine collision-model gap the originally-
+approved design did not know it had, found and fixed before the feature
+itself could work at all), and the generator now spends that capability
+as a real, capped, first/last-beat-excluded hazard beat, stamped as an
+actual `TILE.HAZARD` strip; a real cross-feature interaction with D14's
+checkpoint alcove, which could silently overwrite a hazard strip with
+SOLID ground, was found and fixed alongside it.
 
 **Designed, not built:** two of D8's four named meta-currency purchases —
 flask charges and a backpack slot — real, open design space with no
@@ -1536,7 +1546,16 @@ payload's `healed`/`handedIn` fields with distinct line variants
 `'cinderLost'` reaction (blocked on the cinder economy itself, D14's own
 still-open follow-up); the two-pool tiered version (`checkpoint`/
 `checkpointFinal`) — a real, legitimate future enhancement, not ruled
-out permanently, just not built now.
+out permanently, just not built now. **Since v0.2.22 (D17, §5u):** any
+rise other than 0 for a hazard beat — flat-rise only, a roll's own
+gravity accumulation makes any real rise unmeasured territory; hazard
+beats on spurs (main-path only); more than one hazard beat per generated
+candidate; Ember Dash crossing the same strip (only Roll's 85.5px
+distance is actually measured — Dash parity is an assumption, not a
+measurement, and a real, separate follow-up); any change to
+`edgeAllowed`/`maxGapForRise`/`minGapForRise`/any existing jump-
+capability constant — hazard beats are strictly additive; reacting to
+hazard-beat placement in room-checkpoint narration or telemetry.
 
 **Scaffolding that must be deleted, not built on:** `demoLevel()` in
 `95-app.js` is retired from the primary boot path as of v0.2.6 (§5e) — boot
@@ -3960,6 +3979,215 @@ with distinct line variants (v2). Any `'cinderBanked'`/`'cinderLost'`
 reaction (blocked on the cinder economy itself). The two-pool tiered
 version named above — real future design space, not ruled out
 permanently.
+
+---
+
+## 5u. Roll-crossable hazard beats and the roll wall-leniency prerequisite (v0.2.22, D17)
+
+**Locked from a real design spec, not built freehand — and the spec
+itself grew a new section mid-implementation.**
+`docs/superpowers/specs/2026-08-25-hazard-beats-design.md` was approved
+2026-08-25, before D21 shipped; its implementation landed after D21, in
+three commits, once real attention turned to it. `CFG.GEN_ROLL_HAZARD_TILES`
+(`00-core.js:268`, "ground-level hazard strip crossable via roll: measured
+85.5px = 5.34 tiles") had zero consumers anywhere in the codebase — this
+spec spends it, giving the generator a real beat type that places a gap
+strictly wider than a normal jump can cross but within Roll's own
+measured reach, stamped as a hazard strip a player must actually roll
+across rather than jump over.
+
+**§1a — the physics prerequisite the original design did not know it
+needed, found by verifying rather than assuming.** The approved design's
+own reasoning was distance-margin-only: `GEN_ROLL_HAZARD_TILES` leaves
+about 1.3 tiles of margin under Roll's full measured 85.5px, "the same
+kind of safety margin every other `GEN_*` capability ceiling in this file
+already takes." Verified directly against the real, unmodified sim before
+writing any generator code, this margin turned out to be necessary but
+not sufficient: a flat-rise hazard gap could not be crossed by Roll for
+**any** gap size 1-8, regardless of whether the far platform was
+`TILE.SOLID` or `TILE.ONEWAY`. Root cause, traced through `25-body.js`:
+`Body.prototype.move` resolves the X axis completely before the Y axis
+every sub-step. A roll starts with zero vertical velocity flush against
+the ground; gravity sinks its hitbox into the shared row within 1-2
+ticks — long before it can have crossed the gap horizontally (even one
+tile takes ~3.4 ticks at Roll's fixed speed). By the time it arrives at
+the far platform's x-position, `moveX` finds the far platform's own solid
+tile at that exact row and blocks it as a wall (dead stop, `vx` zeroed);
+if the far platform is `ONEWAY` instead, `moveY`'s "must be falling from
+above" check refuses to catch a body that has already sunk too far, and
+it falls through instead. Neither tile kind lands, for any gap.
+
+The fix is scoped as narrowly as the problem allows: two new `Body`
+fields, `wallLeniency` (bool, default `false`) and `leaveRow` (int,
+default `-1`, `25-body.js:32-39`) — inert for every entity that never
+sets them. `moveX` (`25-body.js:69-80`) gains one new skip condition,
+sibling to its existing `ONEWAY` skip: a `SOLID` tile at row `ty` is not
+treated as a wall if `body.wallLeniency && ty === body.leaveRow`. Only
+`Player.prototype.update`'s grounded-roll-entry branch
+(`30-player.js:547-552`) ever arms these fields, at the instant a
+grounded roll begins (`b.leaveRow = world.tileY(b.bottom()); b.wallLeniency
+= true;`); `Player.prototype.endRoll` (`30-player.js:751-755`) disarms
+them the instant that specific roll ends. The window is bounded on both
+axes by construction, reusing existing state rather than inventing a new
+timer or constant: spatially to the single row the roll departed from (a
+multi-row-tall wall's other rows still block normally — confirmed
+directly by a dedicated Body-level test, see below), temporally to the
+roll's own existing duration (the leniency can never outlive the burst
+that armed it). Deliberately Roll-only, not Dash — Dash only ever
+triggers while airborne, so it has no grounded "row it just left" in the
+same sense, and Ember Dash crossing the same strip remains the separate,
+unmeasured follow-up the spec's own §8 names. Enemies are structurally
+unaffected: no `'roll'`/`'dash'` state exists anywhere in `45-enemy.js`,
+so nothing but the player's own roll-entry ever arms `wallLeniency`.
+
+**A known, accepted trade-off, named in the spec itself.** This exemption
+is not unique to generated hazard beats — it fires for any flat-rise gap
+a roll departs across, anywhere in the game, including a coincidental one
+the generator never intended as a hazard beat. That is the correct,
+desired consequence of fixing a real capability gap, not a leak: Roll
+becomes a consistently reliable way to cross a short flat gap everywhere,
+not a mechanic magically restricted to specifically-tagged beats.
+
+**The hazard beat itself.** A new `hazardEdgeAllowed(a, b)`
+(`50-gen.js:110-114`) — deliberately its own function, not folded into
+the existing `edgeAllowed`, the same "don't conflate two different
+capabilities into one edge test" discipline `edgeAllowed`'s own header
+comment already names as the lesson from an earlier, already-fixed bug
+(an undirected version once let a valid drop silently license the
+reverse climb) — requires `a.y === b.y` (flat-rise only) and a gap
+strictly greater than `GEN_FLAT_GAP_TILES` and at most
+`GEN_ROLL_HAZARD_TILES`. `buildGraph` (`50-gen.js:121-151`) gains an
+optional second parameter, `hazardEdges`: for each recorded `[i, j]`
+pair, it independently RE-validates via `hazardEdgeAllowed` before adding
+`j` to `edges[i]` **and** `i` to `edges[j]` — a deliberate departure from
+the directed jump-edge model (climbing and dropping are asymmetric
+capabilities; roll-crossability is not, since rise is always 0 here) —
+never trusting the generator's own bookkeeping that a pair it *meant* to
+place as valid actually is one ("THE AUDIT IS THE POINT," this file's own
+header). `audit()` (`50-gen.js:180-236`) passes `candidate.hazardEdges`
+through to `buildGraph`, and separately rejects a candidate where any
+OTHER platform's own footprint would overlap a hazard beat's stamped gap
+span (`50-gen.js:208-233`) — a real bug found adversarially: without this,
+a spur (including a pickup-bearing one) could silently lose its own solid
+ground to the hazard strip post-stamp even though pre-stamp reachability
+had already certified it fair.
+
+`placeHazardBeat` (`50-gen.js:293-302`) computes a gap via
+`CFG.GEN_FLAT_GAP_TILES + 1 + rng.int(GEN_ROLL_HAZARD_TILES -
+GEN_FLAT_GAP_TILES)` — a formula that only ever evaluates to exactly 4 at
+current CFG values (the valid range has exactly one integer in it), kept
+as a formula rather than a literal so it stays correct if either constant
+is ever retuned. Inside `generateCandidate`'s main-beat loop
+(`50-gen.js:340-363`), a new `CFG.GEN_HAZARD_BEAT_CHANCE` (0.15) is rolled
+every beat — always drawn, never short-circuited behind whether the cap
+is already spent (see bug 1 below) — and, capped at one hazard beat per
+candidate, excluded from the very first and very last beat: the player's
+first action off spawn would get zero warm-up, and the exit could be
+gated behind a blind hazard crossing; both adversarially found, not part
+of the original design. `stamp()` (`50-gen.js:411-418`) places one row of
+`TILE.HAZARD` per recorded hazard edge, mirroring the existing death-row
+convention. **Frequency: 0.15, not `GEN_RISK_CHANCE`'s 0.02** — these are
+different kinds of rolls; `GEN_RISK_CHANCE` exists so the audit has real
+rejection work to do (tuned to ~20% aggregate rejection), while a hazard
+beat is a valid, intended traversal variety the constant was specifically
+sitting there to be spent on.
+
+**Testing: a new physics prover, `attemptRoll` (`tests/harness.js:594`),
+sibling to `attemptHop`/`attemptHopWith`.** Unlike a hop, roll has no
+strategic variation to fan out over — fixed speed, fixed duration, no
+player timing choice beyond WHEN to press the button while grounded and
+off cooldown — so it drives one deterministic sequence: position a real
+`Player` on `from`, press `roll` once, let physics run for real ticks,
+confirm the body ends grounded on `to`'s platform without ever taking
+hazard damage along the way. `verify_gen.js` feeds every real
+`hazardEdges` pair produced across a 60-seed sweep through it, physically
+confirming every real generated hazard edge, not just trusting the
+isolated 85.5px measurement that originally produced the constant.
+`verify_move.js` gained a full roll-wall-leniency section: the real
+crossing (zero damage taken), the negative walk-doesn't-cross case, a
+genuine multi-row-wall-still-blocks regression, exemption-expiry after
+`endRoll`, `resetTransient()` clearing both fields, enemy-inertness, and
+— added during adversarial review — a direct `Body`/`moveX` test proving
+the exemption is scoped to EXACTLY its own row (`leaveRow`), not every
+row a rolling body's hitbox happens to touch, by driving a wall placed
+one row above, at, and one row below `leaveRow` and confirming the
+assertion actually flips red against that exact mutation.
+
+**Five real production bugs found and fixed, all adversarially, all with
+regression tests:**
+
+1. **An RNG-stream determinism bug (L4).** An earlier version of the
+   per-beat hazard roll (`50-gen.js`'s main-beat loop) gated the draw
+   itself behind `!hazardPlaced &&`, which short-circuits in JS — every
+   beat after a candidate's own hazard placement silently consumed one
+   fewer RNG draw than the surrounding comment claimed, breaking "same
+   seed → same sequence of attempts" the identical way `risky` in
+   `placeMainBeat`/`placeSpur` already avoids. Caught by diffing against a
+   hoisted-roll variant on real seeds. Fixed by drawing the roll
+   unconditionally every beat, regardless of whether the cap is already
+   spent or the beat is excluded by position.
+2. **No exclusion for the first/last beat**, named above — not part of the
+   original design.
+3. **`audit()` had no check for a hazard beat's stamped gap span
+   overlapping another platform's own footprint** — real in roughly one in
+   twenty candidates that place a hazard beat at all, named above.
+4. **A real cross-feature interaction with D14: `Sim.prototype._buildCheckpointAlcove`
+   (`70-sim.js:838-874`) could silently overwrite a hazard strip with SOLID
+   ground.** The exit-row widening walk already stops at another
+   platform's own column, but nothing in the `platforms` array records a
+   hazard strip, so `_columnRisksClimbCeiling` — which only ever inspects
+   `platforms` — had no way to see one. Never a fairness problem (SOLID is
+   strictly easier than HAZARD) but a real, silent feature defeat: the
+   widened exit row would erase the capability D17 just spent whenever it
+   overlapped a hazard gap sharing the exit's row. Fixed by stopping the
+   widening walk at a `TILE.HAZARD` tile the same way it already stops at
+   another platform's column.
+5. **Bug 4's own first fix caused a real regression.** A first version
+   required strict emptiness (not just "not HAZARD"), which also stopped
+   widening through a column that was already SOLID from some OTHER
+   same-row platform — a real, common case `_columnRisksClimbCeiling`'s
+   own rule already treats as safe. Caught by an EXISTING test
+   (`verify_run.js`'s "the full, ideal offset is real, reachable placement
+   code" dropping from its own measured 30% to 0%). Fixed by checking for
+   `TILE.HAZARD` specifically, not "must be empty" — every other tile
+   kind's safety stays exactly what `_columnRisksClimbCeiling` already
+   decides, unchanged.
+
+**Two real coverage gaps closed alongside the bugs above.**
+`tests/verify_run.js`'s own pre-existing checkpoint-alcove regression test
+never passed `hazardEdges` through to `Gen.buildGraph` — silently
+excluding from its own sample any room whose only approach to the exit
+was itself a hazard-beat crossing, the exact blind spot that let bug 4
+above ship undetected in the first place; closed by threading
+`hazardEdges` through. And the wall-leniency tests' own first draft never
+actually exercised a wall WHILE the exemption was armed — both the
+"genuine multi-row wall" and "exemption expires" cases place their wall
+well past Roll's own fixed travel range, so the row-scoping guarantee
+itself went unverified; closed with the direct `Body`/`moveX` test named
+above.
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2654/2654 assertions across 17 suites** (`verify_move` grew from
+202 to 226, `verify_gen` grew from 60 to 79, no new suite),
+`cinder-loop.html` at 457,222 bytes. One unrelated pre-existing test (a
+narrow-spur jump-landing case the physics prover's five strategies don't
+reliably cover) had its hardcoded sample seed swapped from 34 to 35 after
+the new per-beat RNG draw reshuffled seed 34's own generated layout into
+that same pre-existing hard case — confirmed via direct reproduction (all
+5 strategies fail that one `(from, to)` pair in isolation) to be nothing
+this release's own logic caused.
+
+**What was deliberately not done here.** Any rise other than 0 for a
+hazard beat — flat-rise only, per §1's physics grounding. Hazard beats on
+spurs — main-path only. More than one hazard beat per generated
+candidate. Ember Dash crossing the same strip — only Roll's 85.5px
+distance is actually measured; extending this to Dash needs its own real
+measurement, not an assumption of parity, and is a real, separate
+follow-up. Any change to `edgeAllowed`, `maxGapForRise`, `minGapForRise`,
+or any existing jump-capability constant — hazard beats are strictly
+additive. Reacting to hazard-beat placement in room-checkpoint narration,
+telemetry dashboards, or anywhere else outside `50-gen.js` +
+`tests/harness.js` + `tests/verify_gen.js`.
 
 ---
 
