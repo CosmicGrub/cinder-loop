@@ -575,10 +575,117 @@ function attemptHopWith(C, from, to, dir, strategy, opts) {
   return false;
 }
 
+/* D17: a sibling to attemptHop/attemptHopWith above, added for the same
+ * reason those were promoted to this shared file — "a REAL player,
+ * attempted through REAL sim ticks," this time for a Roll crossing rather
+ * than a jump. Unlike a hop, roll has no strategic variation to fan out
+ * over: fixed speed, fixed duration, no player timing choice beyond WHEN
+ * to press the button while grounded and off cooldown — so this drives one
+ * deterministic sequence rather than trying several.
+ *
+ * `opts.world`/`opts.successCheck` follow attemptHopWith's own optional
+ * shape, for reuse against a real generated room instead of an isolated
+ * two-platform world. Returns null for a zero-gap/overlapping-in-x pair
+ * (out of scope, mirroring attemptHop's own convention); otherwise true
+ * only if the body both lands cleanly on `to` AND never took hazard damage
+ * along the way (roll's own i-frames are the entire point of this beat —
+ * a crossing that happens to land but got hurt getting there is not the
+ * capability this is proving). */
+function attemptRoll(C, from, to, opts) {
+  opts = opts || {};
+  const CFG = C.CFG, World = C.World, TILE = C.World.TILE;
+  const dir = to.x1 < from.x0 ? -1 : (to.x0 > from.x1 ? 1 : 0);
+  if (dir === 0) return null;   // zero-gap / overlapping-in-x: out of scope, see above
+
+  let world, ox, oy;
+  if (opts.world) {
+    world = opts.world; ox = 0; oy = 0;
+  } else {
+    const minX = Math.min(from.x0, to.x0) - 4, maxX = Math.max(from.x1, to.x1) + 4;
+    const minY = Math.min(from.y, to.y) - 12, maxY = Math.max(from.y, to.y) + 4;
+    world = new World(maxX - minX + 1, maxY - minY + 1);
+    ox = -minX; oy = -minY;
+    for (let x = from.x0; x <= from.x1; x++) world.set(x + ox, from.y + oy, TILE.SOLID);
+    for (let x = to.x0; x <= to.x1; x++) world.set(x + ox, to.y + oy, TILE.SOLID);
+    // The hazard strip a real hazard beat stamps across the gap, at the
+    // shared/lower row (50-gen.js's stamp() convention) — without this,
+    // "never took hazard damage" would be vacuously true (nothing there
+    // to hit).
+    const hazY = Math.max(from.y, to.y);
+    const gapX0 = dir > 0 ? from.x1 + 1 : to.x1 + 1;
+    const gapX1 = dir > 0 ? to.x0 - 1 : from.x0 - 1;
+    for (let x = gapX0; x <= gapX1; x++) world.set(x + ox, hazY + oy, TILE.HAZARD);
+  }
+
+  // Unlike attemptHopWith, roll needs no run-up (b.vx is set to a fixed
+  // ROLL_SPEED unconditionally on trigger, regardless of prior speed or
+  // position) — spawning far from the departure edge the way a JUMP strategy
+  // wants to (room to build up speed) would only waste roll's own fixed,
+  // limited travel budget crossing the rest of `from`'s own platform before
+  // ever reaching the gap. So this spawns at the edge NEAREST the gap —
+  // deliberately the mirror image of attemptHopWith's own dir>0/dir<0
+  // branches, not a copy of them.
+  const startX = dir > 0 ? (from.x1 + ox + 1) * CFG.TILE - CFG.PLAYER_W - 2 : (from.x0 + ox) * CFG.TILE + 2;
+  const sim = new C.Sim({
+    seed: 7, world, players: 1,
+    spawns: [[startX, (from.y + oy) * CFG.TILE - CFG.PLAYER_H]]
+  });
+  sim.resetTransient();
+  const pad = sim.pads.get(0);
+  const b = sim.players[0].body;
+  const targetY = (to.y + oy) * CFG.TILE - CFG.PLAYER_H;
+  const targetX0 = (to.x0 + ox) * CFG.TILE, targetX1 = (to.x1 + ox + 1) * CFG.TILE;
+
+  // Settle grounded first — a body spawned at rest reads onGround=false on
+  // tick 0 (30-player.js's roll-trigger checks `grounded`, captured from
+  // the PREVIOUS tick's own onGround), so pressing roll before settling
+  // fires the airborne Dash branch instead of a grounded Roll.
+  let settled = false, startHp = null;
+  for (let t = 0; t < 30 && !settled; t++) {
+    sim.step();
+    if (b.onGround) { settled = true; startHp = sim.players[0].hp; }
+  }
+  if (!settled) return false;
+
+  // Facing is latched from the held direction before the roll-trigger
+  // check runs later in the same tick's update(), and stays fixed for the
+  // roll's whole duration — press direction + roll together for exactly
+  // one tick, then release both.
+  let pressed = false, hurt = false;
+  for (let t = 0; t < 60; t++) {
+    if (!pressed) {
+      pad.set(dir > 0 ? 'right' : 'left', true);
+      pad.set('roll', true);
+      pressed = true;
+    } else {
+      pad.set(dir > 0 ? 'right' : 'left', false);
+      pad.set('roll', false);
+    }
+    sim.step();
+    if (sim.players[0].hp < startHp) hurt = true;
+    if (opts.successCheck) {
+      if (opts.successCheck(b, t)) return !hurt;
+    // Roll crouches for its own entire duration (b.setHeight resizes about
+    // the feet), so a body that's merely grounded WHILE STILL MID-ROLL sits
+    // ~10px lower (top-y) than the standing-height targetY this checks
+    // against — e.g. touching down partway across the gap's own hazard
+    // strip, straddling onto the far platform's leading edge, well before
+    // the roll itself has ended. Waiting for state to actually leave
+    // 'roll' (endRoll() has run, the body has stood back up if there was
+    // room to) is what makes this the same "did the crossing genuinely
+    // conclude" check attemptHopWith gets for free (a jump never crouches).
+    } else if (b.onGround && sim.players[0].state !== 'roll' && t > 3) {
+      const landed = b.x + b.w > targetX0 && b.x < targetX1 && Math.abs(b.y - targetY) < 2;
+      return landed && !hurt;
+    }
+  }
+  return false;
+}
+
 module.exports = {
   ROOT, SRC, SIM_FILES, VIEW_FILES, APP_FILES,
   readSrc, loadSim, loadWithView, loadPlatform, loadNarrative, loadAudio, stubCanvas,
   flatWorld, ledgeWorld, FLOOR_Y, REST_Y,
   scenario, Suite,
-  HOP_STRATEGIES, attemptHop, attemptHopWith
+  HOP_STRATEGIES, attemptHop, attemptHopWith, attemptRoll
 };

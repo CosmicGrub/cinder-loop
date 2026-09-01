@@ -266,6 +266,10 @@ var CFG = {
   GEN_DBLJUMP_HIGH_MIN_GAP_TILES: 2,
   GEN_MAX_RISE_TILES: 5,     // no generated beat may ever ask for more rise than this
   GEN_ROLL_HAZARD_TILES: 4,  // ground-level hazard strip crossable via roll: measured 85.5px = 5.34 tiles
+  // D17: per-beat roll to place a hazard beat instead of a normal one,
+  // capped at one per generated candidate (50-gen.js) — see that file's
+  // own hazardEdgeAllowed/placeHazardBeat for the mechanism.
+  GEN_HAZARD_BEAT_CHANCE: 0.15,
 
   GEN_MIN_FIGHT_TILES: 4,    // design judgment, not a measurement — see above
 
