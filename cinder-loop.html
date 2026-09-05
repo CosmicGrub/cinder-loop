@@ -341,6 +341,10 @@ var CFG = {
   GEN_DBLJUMP_HIGH_MIN_GAP_TILES: 2,
   GEN_MAX_RISE_TILES: 5,     // no generated beat may ever ask for more rise than this
   GEN_ROLL_HAZARD_TILES: 4,  // ground-level hazard strip crossable via roll: measured 85.5px = 5.34 tiles
+  // D17: per-beat roll to place a hazard beat instead of a normal one,
+  // capped at one per generated candidate (50-gen.js) — see that file's
+  // own hazardEdgeAllowed/placeHazardBeat for the mechanism.
+  GEN_HAZARD_BEAT_CHANCE: 0.15,
 
   GEN_MIN_FIGHT_TILES: 4,    // design judgment, not a measurement — see above
 
@@ -435,6 +439,13 @@ var CFG = {
   META_DASH_EXT_IFRAMES_COST: 15,
   META_PARRY_RIPOSTE_COST: 20,
   META_PARRY_REFLECT_COST: 25,
+  // D24: the "backpack slot" purchase META_BLUEPRINT_CAPACITY's own
+  // comment named as deferred — raises capacity 1 -> 2. Priced at the
+  // cheap end of this range on purpose: a narrower, situational QoL
+  // purchase (only matters while already carrying one un-handed-in
+  // blueprint AND a second, different, still-locked one drops before the
+  // next checkpoint), not a combat-power purchase like its siblings above.
+  META_BACKPACK_SLOT_COST: 15,
   // Frames of bonus this.iframes granted on a dash's OWN end (endDash(),
   // 30-player.js) when Dash Extended I-Frames is owned — the dash's own
   // i-frames already cover its full committed duration (state === 'dash'),
@@ -445,7 +456,68 @@ var CFG = {
   DASH_EXT_IFRAMES_BONUS: 10,
   // A flat bonus hit, not scaled by Combat.weaponScale like an ordinary
   // swing — Riposte is a reward for the READ, not a second weapon attack.
-  PARRY_RIPOSTE_DAMAGE: 4
+  PARRY_RIPOSTE_DAMAGE: 4,
+
+  /* --- rooms, checkpoints, cinders (60-run.js/70-sim.js/91-progress.js,
+   * room-checkpoint-structure spec, D1-adjacent — the run loop itself is
+   * untouched, see the spec's own §2) -------------------------------------
+   * ROOM_COUNT is the one number everything else in this block answers to
+   * — three combat rooms per level, then the boss, per the spec's own §3.
+   * ROOM_BEATS/ROOM_PICKUPS are smaller-than-a-level opts fed straight into
+   * the EXISTING Gen.generate(seed, opts) — not a new width/height
+   * parameter, since none exists (a level's own size is a DERIVED output
+   * of its platform layout, never a direct input). Named design judgments,
+   * the same discipline GEN_MIN_FIGHT_TILES/META_MAXHP_COST already use —
+   * "how big should a single combat room feel" has no capture plate any
+   * more than "how much room feels fair to fight on" does. */
+  ROOM_COUNT: 3,
+  ROOM_BEATS: 6,       // well under LEVEL's own default of 14 — one focused fight, not a full traversal
+  ROOM_PICKUPS: 2,     // under the level default of 4 — three rooms' worth should roughly match one level's take
+  // The checkpoint alcove stamped onto a room's own exit platform (see
+  // _buildCheckpointAlcove(), 70-sim.js) needs real room for TWO distinct
+  // points that must NOT share an interaction radius: the exit itself
+  // (RUN_EXIT_RADIUS, above) and the tube (TUBE_OFFSET_X/TUBE_INTERACT_
+  // RADIUS, below) — reusing GEN_MIN_FIGHT_TILES verbatim here (4 tiles,
+  // 64px) was tried first and does not actually fit both zones with any
+  // clearance once the numbers are worked out on paper, so this gets its
+  // own, wider constant rather than silently overloading a number picked
+  // for an unrelated purpose (a fair FIGHTING platform, not a two-point
+  // checkpoint fixture).
+  // Up to 11 tiles / 176px (half=floor(10/2)=5 each direction, inclusive of
+  // the exit's own column) — narrower wherever a neighboring platform's own
+  // column stops the stamp early; see _buildCheckpointAlcove()'s own header
+  // (70-sim.js) for why it stops rather than skipping past one.
+  CHECKPOINT_ALCOVE_TILES: 10,
+  // Adversarially found (real, reproduced with actual Sim physics): a
+  // rising jump drifts sideways WHILE still climbing — this game's own
+  // horizontal/vertical motion are fully independent — so protecting only
+  // a lower platform's own literal column (the first version of this fix)
+  // was not enough; a real double-jump climb clipped a stamped ceiling
+  // four real tiles beyond the takeoff platform's own edge. A generous,
+  // named design judgment, not a measurement — no capture plate exists for
+  // "how far can a climb drift before reaching height" any more than one
+  // exists for GEN_MIN_FIGHT_TILES's own "how much room feels fair" — set
+  // comfortably above the worst drift reproduced during this session's own
+  // fuzzing, not tuned to the single case that first surfaced it.
+  CLIMB_CLEARANCE_TILES: 8,
+  // Offset far enough past RUN_EXIT_RADIUS (24px) that standing at the
+  // tube never simultaneously satisfies the exit's own advance check —
+  // walking up to bank cinders must never accidentally leave the room.
+  // 44 - 16 = 28, clearing RUN_EXIT_RADIUS's own 24px edge with margin.
+  TUBE_OFFSET_X: 44,
+  TUBE_INTERACT_RADIUS: 16,
+  // A fraction of MISSING hp, not of max hp — a checkpoint reached at full
+  // health heals nothing (there is nothing to heal), matching how a real
+  // "top you back up" beat should read rather than a flat, sometimes-
+  // wasted number.
+  CHECKPOINT_HEAL_FRAC: 0.5,
+  // Cinders are a second, riskier income stream into the SAME meta.currency
+  // pool RUN_CURRENCY_PER_KILL already pays into (spec §8/§9) — priced
+  // above the flat per-kill rate specifically so banking a real handful
+  // of them reads as worth the walk and the risk, not a rounding error
+  // next to ordinary kill income.
+  CINDER_DROP_CHANCE: 0.25,
+  CINDER_CONVERSION_RATE: 2
 };
 
 /* ------------------------------------------------------------------ math */
@@ -513,7 +585,25 @@ var EVENTS = [
   // localStorage) rather than a redundant re-derivation of something
   // already inferable, the same bar 60-run.js's own "zero new Bus events"
   // held itself to.
-  'blueprintDrop', 'blueprintLost', 'blueprintUnlocked', 'runEnd'
+  'blueprintDrop', 'blueprintLost', 'blueprintUnlocked', 'runEnd',
+  // room-checkpoint-structure spec: 'checkpoint' fires once per room clear
+  // (independent of reaching the exit — see 70-sim.js's own _onRoomClear()
+  // comment for why that separation is load-bearing, not incidental), the
+  // one shared chokepoint 91-progress.js/82-narrative.js/85-audio.js all
+  // hang off, mirroring runEnd's own "one event, several real consumers"
+  // shape rather than inventing a separate signal per consumer. The three
+  // cinder events are each a real, distinct moment (a kill can drop one, a
+  // death can lose several at once, a tube visit can bank several at
+  // once) — kept separate rather than folded into one payload-varying
+  // event, the same "one event per real fact" discipline blueprintDrop/
+  // blueprintLost/blueprintUnlocked already established for the other
+  // carried resource.
+  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked',
+  // D15 (weapon equip & switch): fires from Sim.prototype.switchWeapon the
+  // instant a switch succeeds. Payload names the weapon explicitly
+  // (weaponId, not blueprintUnlocked's own easier-to-misread `id`) — a
+  // deliberate small clarity improvement, not an oversight.
+  'weaponSwitch'
 ];
 
 function Bus() {
@@ -584,7 +674,7 @@ C.aabb = aabb;
 
 var CFG = C.CFG;
 
-var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry'];
+var BUTTONS = ['left', 'right', 'up', 'down', 'jump', 'roll', 'attack', 'parry', 'switchWeapon'];
 
 /* Per-button grace window. Jump gets the tighter buffer because it is the
  * one players spam at the edge of a landing; everything else gets the longer
@@ -604,7 +694,8 @@ var WINDOW = {
   jump: CFG.JUMP_BUFFER_FRAMES,
   roll: CFG.PENDING_FRAMES,
   attack: CFG.PENDING_FRAMES,
-  parry: CFG.PENDING_FRAMES
+  parry: CFG.PENDING_FRAMES,
+  switchWeapon: CFG.PENDING_FRAMES
 };
 
 function Pad() {
@@ -935,6 +1026,20 @@ var DIALOGUE = {
       "This hallway remembers you, even on the days you don't remember it.",
       'Every ember that goes out finds its way back to the same fire.'
     ],
+    // D21: fires once per room clear (70-sim.js's own _onRoomClear()),
+    // independent of the player's own position or which room this is —
+    // calmer than bossEntry on purpose, a held breath rather than a
+    // warning. Double-voiced like every other narrator pool: "tempered"
+    // echoes death's own use of the word directly — first read, a small
+    // mercy; reread post-reveal, the Kilnkeeper naming its own shaping
+    // process out loud, the gentler twin of what death already confessed.
+    checkpoint: [
+      "Rest a moment. The shape holds better when it isn't rushed.",
+      'Something here mends what the fight took. I keep it stocked, for you.',
+      'Not every door needs walking through today. This one will wait.',
+      'Tempered a little more, and no dying required this time.',
+      'The fire banks low here, just enough to catch your breath by.'
+    ],
     bossEntry: [
       'This is the last room before the last room. It always is.',
       'Kilnwarden keeps the deepest heat. Go carefully, or go anyway.',
@@ -1214,6 +1319,14 @@ function Body(x, y, w, h) {
   this.onCeiling = false;
   this.onWall = 0;          // -1 touching a wall to the left, +1 to the right
   this.dropThrough = 0;     // frames remaining of ignoring one-way platforms
+  // D17: a bounded moveX exemption for a body that just left solid ground
+  // horizontally with no upward velocity (a grounded Roll) — see moveX's
+  // own comment below for the mechanism, and 30-player.js's roll-entry/
+  // endRoll for the only place that ever arms/disarms these. Inert for
+  // every other body (enemies, the player in any other state): nothing
+  // else in the codebase ever sets wallLeniency true.
+  this.wallLeniency = false;
+  this.leaveRow = -1;       // the tile row wallLeniency is scoped to, or -1
 }
 
 Body.prototype.bottom = function () { return this.y + this.h; };
@@ -1243,6 +1356,18 @@ function moveX(body, world, dx) {
       // One-way platforms are floors, never walls. Blocking X on them turns
       // every ledge into a shelf you get stuck against.
       if (world.get(tx, ty) !== TILE.SOLID) continue;
+      // D17: a body mid-roll gets a bounded exemption on the exact row it
+      // just left. Without this, ordinary axis-separated resolution (X
+      // fully, then Y) blocks a flat-rise roll on the far platform's own
+      // wall before Y ever gets a chance to land it — a roll starts with
+      // zero vertical velocity flush against the ground, so gravity sinks
+      // its own hitbox into this row within 1-2 ticks, long before it can
+      // have crossed a real gap horizontally. Scoped to ONE row only (a
+      // multi-row-tall wall's other rows still block normally) and to
+      // however long wallLeniency stays armed (roll's own duration) — see
+      // 30-player.js's roll-entry/endRoll, the only place that ever sets
+      // this true/false.
+      if (body.wallLeniency && ty === body.leaveRow) continue;
       if (dx > 0) {
         body.x = tx * CFG.TILE - body.w;
       } else if (dx < 0) {
@@ -1442,6 +1567,11 @@ Player.prototype.resetTransient = function () {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -1534,7 +1664,10 @@ Player.prototype.resetTransient = function () {
   // Deliberately NOT cleared by teleport() (below) — a live level->boss
   // transition is not a death, and D4 says a blueprint survives all the way
   // to "a transition" (hand-in), not merely to the next room.
-  this.carriedBlueprint = null;
+  // D24: an array, up to a capacity 70-sim.js decides (never stored here —
+  // Player has no Meta access, the same one-way dependency this file has
+  // always kept). `.length` IS the fill level; no null-padding.
+  this.carriedBlueprints = [];
   // The box this character's poses were authored in. Combat mirrors and
   // feet-anchors against it, so entities of different sizes each get their own.
   this.poseW = CFG.PLAYER_W;
@@ -1581,6 +1714,11 @@ Player.prototype.teleport = function (x, y) {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -1612,6 +1750,15 @@ Player.prototype.invulnerable = function () {
   return this.iframes > 0 || this.state === 'roll' || this.state === 'dash';
 };
 Player.prototype.alive = function () { return this.state !== 'dead'; };
+// D15 (weapon equip & switch): Combat.step re-reads player.weapon every
+// tick an attack resolves (Combat.weaponScale, 40-combat.js:302-313) to
+// scale its damage — switching mid-swing would silently reweight an
+// in-flight move's damage using the NEW weapon's stat-colour pair, not
+// the one the move actually belongs to. Gating on "no active attack" is
+// necessary and sufficient: player.weapon is read nowhere else outside
+// that one path (design spec §1) — no additional check against roll/
+// dash/ledge state is needed.
+Player.prototype.canSwitchWeapon = function () { return !this.attack; };
 
 Player.prototype.update = function (pad, world, bus) {
   var b = this.body;
@@ -1859,6 +2006,12 @@ Player.prototype.update = function (pad, world, bus) {
       // frame is a free nineteenth frame and the distance overshoots.
       this.rollFrames = CFG.ROLL_FRAMES - 1;
       this.rollFrom = b.x;
+      // D17: arm the moveX wall-leniency (25-body.js) on the exact row
+      // this roll is departing from, while the body is still flush
+      // grounded — see that file's own comment for the mechanism. Cleared
+      // in endRoll(), below, so the exemption can never outlive this roll.
+      b.leaveRow = world.tileY(b.bottom());
+      b.wallLeniency = true;
       if (!this.crouching) { this.crouching = true; b.setHeight(CFG.PLAYER_CROUCH_H); }
       b.vx = this.facing * CFG.ROLL_SPEED;
       // Gravity on the start frame too. Without it vy is 0, moveY never runs,
@@ -2057,6 +2210,11 @@ Player.prototype.finish = function (world, bus, wasGrounded, axis) {
 Player.prototype.endRoll = function (world, bus) {
   var b = this.body;
   this.rollCd = CFG.ROLL_COOLDOWN_FRAMES;
+  // D17: disarm the wall-leniency the instant the roll that armed it ends
+  // — the exemption must never outlive its own roll (30-player.js's own
+  // roll-entry block is the only place this is ever set true).
+  b.wallLeniency = false;
+  b.leaveRow = -1;
   // Stand back up if there is room; a low ceiling keeps you crouched rather
   // than teleporting you into it.
   if (b.canStand(world, CFG.PLAYER_H)) {
@@ -3414,10 +3572,12 @@ C.Combat = Combat;
 /* ===========================================================================
  * 45-enemy.js  —  enemy entities + per-instance-seeded brains
  * ---------------------------------------------------------------------------
- * SIM layer. The engine knows four primitives — walk+melee, walk+charge,
- * walk+shoot, fly+dive. A template in 10-data.js picks one and supplies
- * numbers. Adding a fifth archetype costs exactly one primitive; adding a
- * fifth ENEMY costs a row (D7).
+ * SIM layer. The engine knows five primitives — walk+melee, walk+charge,
+ * walk+shoot, fly+dive, and walk+summon (D16 — an elite that calls in
+ * one of the regular roster mid-fight, 56-caller.js). A template in
+ * 10-data.js picks one and supplies numbers. Adding a sixth archetype
+ * costs exactly one primitive; adding a fifth regular ENEMY costs a row
+ * (D7) — the Caller is kept OUT of that roster the same way Kilnwarden is.
  *
  * THE FAIRNESS RULE, and it is the whole design:
  *
@@ -3550,6 +3710,12 @@ Enemy.prototype.resetTransient = function () {
   this.activeMove = null;
   this.phase = 0;
   this._zoneTiles = null;
+  // Optional summon-primitive support (56-caller.js). Only 'summon'-verb
+  // templates (the Caller) ever increment this; a LIFETIME cap across the
+  // whole encounter, read by callIn() as `this.summonsUsed >= m.summonMax`.
+  // Never leaves 0 for the regular roster or the boss — provably a no-op
+  // for both, the same guarantee activeMove/phase already document above.
+  this.summonsUsed = 0;
   return this;
 };
 
@@ -3642,6 +3808,7 @@ Enemy.prototype.update = function (world, players, bus, ctx) {
     case 'strike':   this.doStrike(); break;
     case 'charge':   this.doCharge(); break;
     case 'shoot':    this.doShoot(); break;
+    case 'summon':   this.doSummon(); break;
     case 'dive':     this.doDive(); break;
     case 'zone':     this.doZone(world); break;
     case 'phaseTransition': this.doPhaseTransition(); break;
@@ -3797,6 +3964,10 @@ Enemy.prototype.doTelegraph = function (bus, ctx) {
       this.fire(ctx);
       this.enter('shoot');
       break;
+    case 'summon':
+      this.callIn(ctx);
+      this.enter('summon');
+      break;
     case 'dive':
       this.enter('dive');
       break;
@@ -3825,6 +3996,55 @@ Enemy.prototype.fire = function (ctx) {
   }
 };
 
+// D16 (summon primitive): places up to m.summonCount real, independent
+// Enemy instances via ctx.addEnemy — a two-line mirror of ctx.addShot
+// above, delegating to the already-existing Sim.prototype.addEnemy.
+// this.summonsUsed is a LIFETIME cap across the whole encounter, not a
+// per-cast budget — a Caller that has already used up m.summonMax calls
+// telegraphs for nothing further; the >= guard at entry makes a repeat
+// call a safe, cheap no-op rather than re-summoning past the cap. No
+// parent/child link to what gets spawned — killing this Caller does not
+// despawn its own summoned adds (this engine has no such lifecycle
+// mechanism anywhere, and building one isn't warranted for v1).
+//
+// Adversarially found: "no terrain-probing needed, gravity resolves it"
+// (the original design reasoning) is false when the offset spawn point
+// lands INSIDE a multi-row-solid mass rather than open air or a shallow
+// floor overlap — Body.prototype.moveY only snaps out of the TOPMOST
+// solid row it currently overlaps, so a deeply-embedded body re-triggers
+// that same snap every tick and climbs upward through the rock instead of
+// falling. Real generated rooms really do have such walls (50-gen.js's
+// own boundary-column stamp, spanning a room's full height), and
+// lockFacing can point straight at one. Checked directly against the
+// summoned template's own real footprint (not a 1x1 guess) and falls
+// back to the Caller's own already-valid position when embedded — the
+// same defensive-fallback shape pickMove() already uses when its own
+// eligible pool is empty.
+Enemy.prototype.callIn = function (ctx) {
+  var m = this.activeMove || this.t, b = this.body;
+  if (!ctx || !ctx.addEnemy || this.summonsUsed >= m.summonMax) return;
+  var count = m.summonCount || 1;
+  var summonT = DATA.ENEMIES[m.summonId];
+  var sw = summonT ? summonT.w : 1, sh = summonT ? summonT.h : 1;
+  for (var i = 0; i < count; i++) {
+    if (this.summonsUsed >= m.summonMax) break;
+    // this.lockFacing scales BOTH terms — the base offset and the
+    // per-index fan-out — so successive spawns fan out AWAY from the
+    // Caller symmetrically regardless of which way it's facing. An
+    // earlier version only scaled the base offset, folding later spawns
+    // back toward (and eventually past) the Caller when facing left —
+    // dead in v1 (summonCount is 1) but a real formula bug waiting for
+    // the first template that ever raises it.
+    var spawnX = b.x + this.lockFacing * (m.summonOffset || 24) + this.lockFacing * i * 12;
+    var spawnY = b.y;
+    if (ctx.rectSolid && ctx.rectSolid(spawnX, spawnY, sw, sh)) {
+      spawnX = b.x; spawnY = b.y;
+    }
+    ctx.addEnemy(m.summonId, spawnX, spawnY);
+    this.summonsUsed++;
+  }
+};
+
 Enemy.prototype.doStrike = function () {
   // The rig move drives the timing; advanceMove ends it.
   this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
@@ -3838,6 +4058,19 @@ Enemy.prototype.doCharge = function () {
 };
 
 Enemy.prototype.doShoot = function () {
+  var m = this.activeMove || this.t;
+  this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
+  if (this.stateFrames >= m.recover) this.enter('recover');
+};
+
+// D16: a near-copy of doShoot()'s own body, deliberately — every other
+// primitive gives the player a real post-commit punish window (m.recover
+// frames standing still before falling into the shared cooldown logic in
+// doRecover()); skipping straight to 'recover' after the call fires (the
+// original pitch's own proposed shape) would have made a Caller uniquely
+// safe the instant its telegraph ends, unlike every other enemy in the
+// game.
+Enemy.prototype.doSummon = function () {
   var m = this.activeMove || this.t;
   this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
   if (this.stateFrames >= m.recover) this.enter('recover');
@@ -3944,7 +4177,7 @@ Enemy.prototype.doStaggered = function () {
 
 /* The transition itself is requested here — the one seam in the whole
  * state machine where nothing dangerous is ever in flight (doRecover is
- * reached only after strike/charge/shoot/dive/zone have each fully
+ * reached only after strike/charge/shoot/summon/dive/zone have each fully
  * resolved) — rather than checked eagerly every tick from update(), so an
  * hp threshold crossed mid-attack can never retroactively revise an attack
  * already telegraphed. Same discipline as the fairness rule itself: a
@@ -4088,18 +4321,59 @@ function edgeAllowed(from, to) {
   return cap >= 0 && gap <= cap && gap >= minGapForRise(rise);
 }
 
+/* D17: a hazard-beat edge is a genuinely different capability from a jump
+ * edge, not a variant of one — deliberately its own function rather than
+ * folded into edgeAllowed above, the same way this file's own header
+ * comment on edgeAllowed already names the risk of conflating two
+ * different capabilities into one test (an earlier undirected version of
+ * edgeAllowed let a valid drop silently license the reverse climb — a
+ * real, already-fixed bug this file learned from once).
+ *
+ * Flat-rise only: 30-player.js's Roll keeps accumulating gravity even off
+ * a ledge, so any real rise risks the roll falling short of a higher
+ * target or overshooting a lower one — neither is measured, so this stays
+ * out of scope (see the D17 spec's own §1). Symmetric, unlike edgeAllowed:
+ * since rise is always 0 here, roll-crossability is genuinely the same in
+ * both directions — buildGraph, below, adds a valid hazard edge to the
+ * graph in both directions for exactly this reason. */
+function hazardEdgeAllowed(a, b) {
+  if (a.y !== b.y) return false;
+  var gap = gapBetween(a, b);
+  return gap > CFG.GEN_FLAT_GAP_TILES && gap <= CFG.GEN_ROLL_HAZARD_TILES;
+}
+
 /* ------------------------------------------------------------------ graph
  * Plain data in, plain data out — no World, no tiles, so this half of the
  * audit is testable with hand-built platform lists and nothing else.
  * DIRECTED: edges[i] lists every j reachable FROM i, which is not generally
  * the same set as what can reach i. */
-function buildGraph(platforms) {
+function buildGraph(platforms, hazardEdges) {
   var n = platforms.length, edges = [], i, j;
   for (i = 0; i < n; i++) edges.push([]);
   for (i = 0; i < n; i++) {
     for (j = 0; j < n; j++) {
       if (i === j) continue;
       if (edgeAllowed(platforms[i], platforms[j])) edges[i].push(j);
+    }
+  }
+  // D17: each recorded hazard-beat pair is independently RE-VALIDATED here
+  // via hazardEdgeAllowed — never trusting the generator's own bookkeeping
+  // that a pair it MEANT to place as a valid hazard beat actually is one.
+  // "THE AUDIT IS THE POINT" (this file's own header) applies exactly as
+  // much to a hazard edge as to a jump edge. Added BOTH directions,
+  // deliberately unlike the directed main loop just above — hazardEdgeAllowed
+  // is symmetric by construction (flat-rise only), so the reverse crossing
+  // is exactly as real as the forward one. Do NOT "fix" this to be
+  // directed to match edgeAllowed's own model: that model is directed
+  // specifically because climbing and dropping are asymmetric capabilities,
+  // a distinction that does not exist when rise is 0.
+  if (hazardEdges) {
+    for (i = 0; i < hazardEdges.length; i++) {
+      var hi = hazardEdges[i][0], hj = hazardEdges[i][1];
+      if (hazardEdgeAllowed(platforms[hi], platforms[hj])) {
+        edges[hi].push(hj);
+        edges[hj].push(hi);
+      }
     }
   }
   return edges;
@@ -4134,7 +4408,7 @@ function reachableFrom(edges, startIdx) {
  * audit() only ever reads and reports. */
 function audit(candidate) {
   var platforms = candidate.platforms;
-  var edges = buildGraph(platforms);
+  var edges = buildGraph(platforms, candidate.hazardEdges);
   var reach = reachableFrom(edges, candidate.spawnIdx);
   var reasons = [];
 
@@ -4157,6 +4431,33 @@ function audit(candidate) {
     if (width < CFG.GEN_MIN_FIGHT_TILES) {
       reasons.push('platform ' + i + ' is ' + width + ' tiles wide, under the ' +
         CFG.GEN_MIN_FIGHT_TILES + '-tile fightable minimum');
+    }
+  }
+
+  // D17: no OTHER platform's own footprint may overlap a hazard beat's
+  // stamped gap span. stamp() (below) overwrites that exact row with
+  // TILE.HAZARD; placeSpur has no awareness of hazardEdges and can anchor a
+  // spur (including a pickup-bearing one) inside that span, which reach[]
+  // above would still certify reachable — it was computed from PRE-stamp
+  // geometry, before the spur's own solid ground silently became hazard.
+  // Adversarially found (real generated output, not a hypothetical): this
+  // happens in roughly one in twenty candidates that place a hazard beat at
+  // all. Checked here, not patched at stamp() time, so an unsafe candidate
+  // is rejected and regenerated instead — "the audit is the point" applies
+  // exactly as much to this as to reachability or fight-width.
+  if (candidate.hazardEdges) {
+    for (i = 0; i < candidate.hazardEdges.length; i++) {
+      var he = candidate.hazardEdges[i];
+      var hazFrom = platforms[he[0]], hazTo = platforms[he[1]];
+      var haz0 = hazFrom.x1 + 1, haz1 = hazTo.x0 - 1;
+      for (var k = 0; k < platforms.length; k++) {
+        if (k === he[0] || k === he[1]) continue;
+        var pk = platforms[k];
+        if (pk.y !== hazFrom.y) continue;
+        if (pk.x1 >= haz0 && pk.x0 <= haz1) {
+          reasons.push('platform ' + k + ' overlaps hazard beat [' + he[0] + ',' + he[1] + ']\'s own gap span');
+        }
+      }
     }
   }
 
@@ -4209,6 +4510,26 @@ function placeMainBeat(rng, platforms, cursorX, cursorY) {
   return p;
 }
 
+/* D17: a beat spending CFG.GEN_ROLL_HAZARD_TILES — a gap strictly wider
+ * than a normal jump can cross (GEN_FLAT_GAP_TILES) but within Roll's own
+ * measured reach. Flat rise only, enforced at the call site (no rise
+ * parameter at all) rather than merely in hazardEdgeAllowed's own check.
+ * `gap`'s formula only ever evaluates to exactly GEN_ROLL_HAZARD_TILES
+ * today (the valid range (GEN_FLAT_GAP_TILES, GEN_ROLL_HAZARD_TILES] has
+ * exactly one integer in it at current CFG values) — written as a formula
+ * rather than a literal so it stays correct if either constant is ever
+ * retuned. */
+function placeHazardBeat(rng, platforms, cursorX, cursorY) {
+  var gap = CFG.GEN_FLAT_GAP_TILES + 1 +
+    rng.int(CFG.GEN_ROLL_HAZARD_TILES - CFG.GEN_FLAT_GAP_TILES);
+  var width = CFG.GEN_MIN_FIGHT_TILES + rng.int(6);
+  var newX0 = cursorX + 1 + gap;
+  var kind = rng.next() < 0.18 ? TILE.ONEWAY : TILE.SOLID;
+  var p = { x0: newX0, x1: newX0 + width - 1, y: cursorY, kind: kind, spur: false };
+  platforms.push(p);
+  return p;
+}
+
 // A short side alcove branching off an existing platform — up or down,
 // left or right — reachable only via its own capability-constrained hop,
 // which is what makes "reachable to every pickup" a genuine question for
@@ -4243,8 +4564,31 @@ function generateCandidate(rng, opts) {
   platforms.push(start);
 
   var cursor = start, i;
+  // D17: capped at one hazard beat per candidate via hazardPlaced.
+  var hazardEdges = [], hazardPlaced = false;
   for (i = 0; i < beats; i++) {
-    cursor = placeMainBeat(rng, platforms, cursor.x1, cursor.y);
+    // Always drawn, regardless of whether the cap is already spent or this
+    // beat is excluded by position below — the RNG stream must stay
+    // identical regardless of WHEN (or whether) the hazard beat lands
+    // (L4), the same reasoning `risky` already follows in placeMainBeat/
+    // placeSpur. Adversarially found: an earlier version gated the draw
+    // itself behind `!hazardPlaced &&`, which SHORT-CIRCUITS in JS — every
+    // beat after a candidate's own hazard placement silently consumed one
+    // fewer RNG draw than this comment claims, a real bug the review
+    // caught by diffing against a hoisted-roll variant on real seeds.
+    var hazardRoll = rng.next() < CFG.GEN_HAZARD_BEAT_CHANCE;
+    // Excluded from the very first beat (would be the player's first
+    // action off spawn, with zero warm-up) and the very last (would gate
+    // the exit behind a blind hazard crossing) — also adversarially found,
+    // not part of the original design.
+    if (!hazardPlaced && hazardRoll && i > 0 && i < beats - 1) {
+      var beforeIdx = platforms.length - 1;
+      cursor = placeHazardBeat(rng, platforms, cursor.x1, cursor.y);
+      hazardEdges.push([beforeIdx, platforms.length - 1]);
+      hazardPlaced = true;
+    } else {
+      cursor = placeMainBeat(rng, platforms, cursor.x1, cursor.y);
+    }
   }
   var exitIdx = platforms.length - 1;
 
@@ -4262,7 +4606,7 @@ function generateCandidate(rng, opts) {
     });
   }
 
-  return { platforms: platforms, spawnIdx: 0, exitIdx: exitIdx, pickups: pickups };
+  return { platforms: platforms, spawnIdx: 0, exitIdx: exitIdx, pickups: pickups, hazardEdges: hazardEdges };
 }
 
 /* ---------------------------------------------------------------- stamp
@@ -4293,6 +4637,14 @@ function stamp(candidate, rng) {
   // hand-built demo level's own pit is never a silent free fall (masterfile
   // §"honest state": falling costs a heart, it is not a teleport to spawn).
   for (var x2 = 0; x2 < w; x2++) world.set(x2, deathRow, TILE.HAZARD);
+  // D17: one row of HAZARD per recorded hazard beat, spanning the gap
+  // between its two platforms — mirrors the death-row convention just
+  // above at the scale of one gap instead of the whole level width.
+  for (var hIdx = 0; hIdx < candidate.hazardEdges.length; hIdx++) {
+    var he = candidate.hazardEdges[hIdx];
+    var pa = platforms[he[0]], pb = platforms[he[1]];
+    for (var hx = pa.x1 + 1; hx <= pb.x0 - 1; hx++) world.set(hx, pa.y, TILE.HAZARD);
+  }
   for (var y = 0; y < h; y++) { world.set(0, y, TILE.SOLID); world.set(w - 1, y, TILE.SOLID); }
 
   var spawnP = platforms[candidate.spawnIdx];
@@ -4339,7 +4691,8 @@ function generate(seed, opts) {
     world: stamped.world, spawn: stamped.spawn, exit: stamped.exit, pickups: stamped.pickups,
     attempts: attempts, rejected: rejected,
     rejectionRate: rejected / attempts,
-    platforms: candidate.platforms
+    platforms: candidate.platforms,
+    hazardEdges: candidate.hazardEdges
   };
 }
 
@@ -4353,6 +4706,7 @@ C.Gen = {
   minGapForRise: minGapForRise,
   gapBetween: gapBetween,
   edgeAllowed: edgeAllowed,
+  hazardEdgeAllowed: hazardEdgeAllowed,
   stamp: stamp
 };
 
@@ -4542,6 +4896,80 @@ C.Boss = {
 
 })(CINDER);
 
+/* ==== src/56-caller.js ==== */
+/* ===========================================================================
+ * 56-caller.js  —  the Caller, an elite that calls in help mid-fight
+ * ---------------------------------------------------------------------------
+ * SIM layer. Realizes the 'summon' primitive this feature (D16) adds to
+ * 45-enemy.js — exactly one elite template, kept OUT of DATA.ENEMIES/
+ * ENEMY_IDS the same way Kilnwarden is (D9's roster stays hard-pinned to
+ * four; verify_enemy.js). 45-enemy.js's Enemy constructor already accepts
+ * a template OBJECT directly, so this file needs zero constructor changes
+ * to exist — exactly like 55-boss.js before it.
+ *
+ * hp: 36 — 2x Ashwalker's 18 (10-data.js), the highest hp of the regular
+ * four — an elite judgment, not a measurement, the same style as
+ * CFG.GEN_MIN_FIGHT_TILES's own named guess.
+ * reach: 190 — a ranged-commit distance, matching kilnspitter's own 200
+ * (10-data.js) — the generic commit gate (45-enemy.js) reads t.reach
+ * regardless of attack type, not just for melee.
+ * summonId: 'ashwalker' — genuinely the shortest REACH of the regular
+ * four (26, vs. emberrush's 130 / kilnspitter's 200 / wickmoth's 62), so
+ * what it calls in is never itself a fairness regression; NOT the
+ * shortest telegraph (its 20 is second-shortest — wickmoth's is 18). An
+ * earlier version of this comment (and the design spec) overclaimed
+ * "shortest reach/telegraph" — corrected here to what the real numbers in
+ * 10-data.js actually say, chosen for the reach property, not both.
+ * summonMax: 2 — a LIFETIME cap across the whole encounter (see
+ * Enemy.prototype.callIn, 45-enemy.js), not a "keep N alive" budget.
+ * summonOffset: 24 — how far in front of the Caller a call lands, before
+ * lockFacing/terrain adjustment. Lives on the template rather than CFG or
+ * an inline literal — the same D7 "content is data" reasoning
+ * summonId/summonCount/summonMax already follow, since this is elite-
+ * specific placement, not an engine-wide tunable any other template reads.
+ * No summonCooldown field — the template's own `cooldown` already does that
+ * job generically (doRecover()), the same field every other primitive uses.
+ *
+ * No damage/knock/projectile fields — the call itself deals no damage,
+ * unlike kilnspitter's own 'shoot' template which needs them for its Shot.
+ *
+ * Owned by: Enemy team.
+ * ======================================================================== */
+;(function (C) {
+'use strict';
+
+var CALLER = {
+  id: 'caller',
+  name: 'Caller',
+  hp: 36,
+  w: 14, h: 26,
+  mode: 'walk',
+  attack: 'summon',
+  move: null,
+  speed: 0.8,
+  accel: 0.13,
+  sight: 220,
+  reach: 190,
+  telegraph: 24,            // >= CFG.MIN_TELEGRAPH (14)
+  recover: 26,
+  cooldown: 70,
+  contact: 0,               // dangerous() is not extended for 'summon' —
+                             // the call itself carries no body threat
+  patrol: 40,
+  summonId: 'ashwalker',
+  summonCount: 1,
+  summonMax: 2,
+  summonOffset: 24,
+  tint: '#7a4f9c', tintDark: '#3c2650',
+  scale: 1.15
+};
+
+C.Caller = {
+  template: CALLER
+};
+
+})(CINDER);
+
 /* ==== src/60-run.js ==== */
 /* ===========================================================================
  * 60-run.js  —  the run loop (D1): spawn -> clear -> boss -> die -> spend -> respawn
@@ -4620,6 +5048,11 @@ function Run(seed) {
   this.currency = 0;            // D8's thin stub — 65-meta.js's real economy hangs off this later
   this.runsCompleted = 0;
   this.kills = 0;               // regular (non-boss) kills banked toward THIS run's payout
+  // room-checkpoint-structure spec: which combat room (0..CFG.ROOM_COUNT-1)
+  // is currently loaded within the current level. Set by Sim the moment a
+  // room actually loads, the same "levelSeed's own comment" precedent right
+  // above — never advanced here, this field only ever records what Sim did.
+  this.roomIndex = 0;
 }
 
 /* ---------------------------------------------------------------- seeding
@@ -4680,6 +5113,18 @@ function deriveEnemySeed(levelSeed) {
 // though only one of the two is ever alive at a time. 0x424F5353 = "BOSS".
 function deriveBossSeed(levelSeed) {
   return (mix32(levelSeed ^ 0x424F5353) >>> 0) || 1;
+}
+// Same idea again, for a combat room's own geometry seed — distinct from
+// both deriveEnemySeed's and deriveBossSeed's own salts so a level's three
+// rooms, its regular enemy-placement stream, and its boss never draw from
+// the same derived value even though `roomIndex` and levelSeed alone would
+// otherwise collide with deriveEnemySeed's own single-salt shape. Folds
+// `roomIndex` in the same "+1, times a real odd multiplicative constant"
+// shape deriveLevelSeed already uses for levelIndex — not a bare XOR, per
+// this file's own header on why that already caused one real collision
+// bug. 0x524F4F4D = "ROOM".
+function deriveRoomSeed(levelSeed, roomIndex) {
+  return (mix32(levelSeed ^ (((roomIndex + 1) * 2654435761) ^ 0x524F4F4D)) >>> 0) || 1;
 }
 
 /* --------------------------------------------------------------- "clear"
@@ -4768,6 +5213,7 @@ C.RunLogic = {
   nextRunSeed: nextRunSeed,
   deriveEnemySeed: deriveEnemySeed,
   deriveBossSeed: deriveBossSeed,
+  deriveRoomSeed: deriveRoomSeed,
   isLevelClear: isLevelClear,
   reachedExit: reachedExit,
   currencyEarned: currencyEarned,
@@ -4834,6 +5280,12 @@ function Meta() {
                                // accumulates within a session; this file's only
                                // new contribution is making it survive a reload
   this.unlocked = {};         // weaponId -> true, meaningful only once enforceLocks is true
+  // D15 (weapon equip & switch): which WEAPONS id a fresh reset applies
+  // (see 70-sim.js's own _applyMetaToPlayer). Defaults to 'blade' — the
+  // same default resetTransient() already uses, so a first boot needs no
+  // migration. Updated by Sim.prototype.switchWeapon the instant player 0
+  // explicitly switches (design spec §3) — not a run-end snapshot.
+  this.lastWeapon = 'blade';
   this.maxHpBonus = 0;        // permanent +max HP, stacked one META_MAXHP_GAIN at a time
   this.enforceLocks = CFG.META_ENFORCE_LOCKS_DEFAULT;   // D4's own "debug-room toggle"
   // Ability enhancements (abilities spec §4) — four independent flat-cost
@@ -4844,6 +5296,10 @@ function Meta() {
   this.dashExtIframes = false;
   this.parryRiposte = false;
   this.parryReflect = false;
+  // D24: the backpack slot — a fifth flat-cost boolean of the exact same
+  // shape. Raises blueprint carry capacity 1 -> 2 (70-sim.js's own
+  // _blueprintCapacity reads it fresh at every drop, never snapshotted).
+  this.backpackSlot = false;
 }
 
 function isPlainObject(v) {
@@ -4880,6 +5336,7 @@ function sanitize(raw) {
   if (typeof raw.dashExtIframes === 'boolean') out.dashExtIframes = raw.dashExtIframes;
   if (typeof raw.parryRiposte === 'boolean') out.parryRiposte = raw.parryRiposte;
   if (typeof raw.parryReflect === 'boolean') out.parryReflect = raw.parryReflect;
+  if (typeof raw.backpackSlot === 'boolean') out.backpackSlot = raw.backpackSlot;
 
   if (isPlainObject(raw.unlocked)) {
     var ids = C.DATA.WEAPON_IDS, i;
@@ -4887,6 +5344,9 @@ function sanitize(raw) {
       if (raw.unlocked[ids[i]] === true) out.unlocked[ids[i]] = true;
     }
   }
+  // D15: the same "validate against DATA.WEAPON_IDS, fall back to the
+  // safe default otherwise" pattern `unlocked` above already uses.
+  if (C.DATA.WEAPON_IDS.indexOf(raw.lastWeapon) !== -1) out.lastWeapon = raw.lastWeapon;
   return out;
 }
 
@@ -4977,6 +5437,10 @@ function spendOnParryRiposte(currency) {
 function spendOnParryReflect(currency) {
   return C.RunLogic.spend(currency, CFG.META_PARRY_REFLECT_COST);
 }
+// D24: the backpack slot, same shape as the four above.
+function spendOnBackpackSlot(currency) {
+  return C.RunLogic.spend(currency, CFG.META_BACKPACK_SLOT_COST);
+}
 
 C.Meta = Meta;
 C.MetaLogic = {
@@ -4991,7 +5455,8 @@ C.MetaLogic = {
   spendOnDashExtraCharge: spendOnDashExtraCharge,
   spendOnDashExtIframes: spendOnDashExtIframes,
   spendOnParryRiposte: spendOnParryRiposte,
-  spendOnParryReflect: spendOnParryReflect
+  spendOnParryReflect: spendOnParryReflect,
+  spendOnBackpackSlot: spendOnBackpackSlot
 };
 
 })(CINDER);
@@ -5078,7 +5543,20 @@ function Sim(opts) {
   var self = this;
   this.ctx = {
     rig: this.rig,
-    addShot: function (shot) { self.shots.push(shot); return shot; }
+    addShot: function (shot) { self.shots.push(shot); return shot; },
+    // D16 (summon primitive): a two-line mirror of addShot above, letting
+    // Enemy.prototype.callIn place a real, independent Enemy without
+    // reaching past ctx into Sim directly. Delegates to the already-real,
+    // already-tested Sim.prototype.addEnemy unchanged.
+    addEnemy: function (tid, x, y) { return self.addEnemy(tid, x, y); },
+    // Adversarially found (D16): callIn() needs to check a spawn point
+    // against real terrain before placing an enemy there. A FUNCTION, not
+    // a captured `self.world` reference — this.world is REPLACED wholesale
+    // on every room/boss transition (_enterRoom/_enterBoss), so a snapshot
+    // taken once at construction time would go stale the instant the
+    // first transition happened, the same staleness class rig/addShot's
+    // own function-not-reference shape already avoids.
+    rectSolid: function (x, y, w, h) { return self.world.rectSolid(x, y, w, h); }
   };
 
   this.rng = new RNG(this.seed);
@@ -5090,7 +5568,7 @@ function Sim(opts) {
    * Inert by construction: this.run always exists (a plain data holder,
    * see 60-run.js), but the orchestration in _stepRun() below only ever
    * runs once this.exit or this.bossTarget is non-null, which happens
-   * only inside beginRun()/_enterLevel()/_enterBoss() — never at plain
+   * only inside beginRun()/_enterRoom()/_enterBoss() — never at plain
    * construction. Every existing hand-built scenario() in this codebase
    * (no exit, never calls beginRun()) takes zero of those branches,
    * forever, byte-for-byte identical to before this file existed. */
@@ -5099,7 +5577,16 @@ function Sim(opts) {
   this.bossTarget = null;
   this.runEndFrames = -1;       // -1 = no boss-victory-without-death pause pending
   this._pendingLevel = null;    // eagerly-computed next level, applied only at commit
-  this._levelRosterIds = [];    // which live target ids count toward THIS level's own "clear"
+  this._levelRosterIds = [];    // which live target ids count toward THIS room's own "clear"
+  // room-checkpoint-structure spec: the checkpoint alcove's own anchor
+  // point, [x,y] or null (mirrors this.exit's own "position, not a phase
+  // flag" shape) — set by _buildCheckpointAlcove() inside _enterRoom(),
+  // explicitly null during the boss phase (_enterBoss() sets it, the arena
+  // has no tube any more than it has an exit). _checkpointFired guards
+  // _onRoomClear() to once per room, reset alongside every other per-room
+  // field inside _clearEntities() below.
+  this.tube = null;
+  this._checkpointFired = false;
   this._wasDead = [];
   for (i = 0; i < this.players.length; i++) this._wasDead.push(false);
 
@@ -5148,7 +5635,7 @@ function Sim(opts) {
   this.bus.on('targetDown', function (e) {
     if (self.exit === null && self.bossTarget === null) return;
     if (self.bossTarget && e.id === self.bossTarget.id) return;
-    // Only THIS level's own real roster counts (_levelRosterIds, the same
+    // Only THIS room's own real roster counts (_levelRosterIds, the same
     // guard isLevelClear()/_roster() already use) — a boot-path practice
     // Dummy (95-app.js, id 100, added AFTER beginRun() specifically so it
     // never blocks "clear") lives in this exact array and, without this
@@ -5176,8 +5663,9 @@ function Sim(opts) {
     if (dropId) {
       for (var pi = 0; pi < self.players.length; pi++) {
         var pl = self.players[pi];
-        if (pl.alive() && !pl.carriedBlueprint) {
-          pl.carriedBlueprint = dropId;
+        // D24: "has room," not "is empty" — capacity read fresh from meta.
+        if (pl.alive() && pl.carriedBlueprints.length < _blueprintCapacity(self.meta)) {
+          pl.carriedBlueprints.push(dropId);
           self.bus.emit('blueprintDrop', { id: dropId, playerId: pl.id, x: e.x, y: e.y });
           break;
         }
@@ -5241,6 +5729,29 @@ Sim.prototype.step = function () {
   }
 
   var i, p, want = 0;
+
+  // 0. D15: weapon switch is consumed before attack input, so identity
+  //    resolves before action — a same-tick switch-then-attack combo
+  //    correctly swings with the newly-equipped weapon, zero added
+  //    latency. Consumed in the SIM layer, mirroring exactly how roll/
+  //    jump/parry/attack are already consumed inside Player.prototype.
+  //    update()/Combat.begin() below rather than in 95-app.js — that
+  //    split is what lets a test script pad.set() and step the sim
+  //    directly, with no fake DOM events.
+  //
+  //    Adversarially found: this loop originally consumed the press
+  //    regardless of alive() — the ONLY action in this file that would
+  //    have permanently destroyed a buffered press made during a
+  //    player's death animation instead of leaving it to decay/persist on
+  //    its own schedule, unlike attack (Combat.begin's own `if
+  //    (!player.alive()) return;`, checked BEFORE its own pad.buffered()
+  //    read) and jump/roll/parry (Player.prototype.update's own dead
+  //    early-return, which sits before every one of its own pad.consume()
+  //    calls). Guarded the identical way here.
+  for (i = 0; i < this.players.length; i++) {
+    p = this.players[i];
+    if (p.alive() && this.pads.get(i).consume('switchWeapon')) this.cycleWeapon(i);
+  }
 
   // 1. Attack input is consumed before anything moves, so a swing costs zero
   //    frames of latency for the same reason a jump does.
@@ -5377,6 +5888,11 @@ Sim.prototype._applyMetaToPlayer = function (player) {
   player.parryRiposte = this.meta.parryRiposte;
   player.parryReflect = this.meta.parryReflect;
   if (this.meta.dashExtraCharge) player.dashCharges = 1;
+  // D15: reset to resetTransient()'s safe 'blade' baseline, then layer the
+  // permanent choice back on — the same two-step every other field in
+  // this method already uses.
+  player.weapon = MetaLogic.isUnlocked(this.meta, this.meta.lastWeapon)
+    ? this.meta.lastWeapon : 'blade';
 };
 
 // Loads a DIFFERENT meta state into an already-constructed Sim — a real
@@ -5432,6 +5948,27 @@ Sim.prototype.buyMaxHp = function () {
     var p = this.players[i];
     if (p.alive()) { p.maxHp += CFG.META_MAXHP_GAIN; p.hp += CFG.META_MAXHP_GAIN; }
   }
+  return true;
+};
+
+// D24: how many blueprints one player may carry at once. Read fresh from
+// meta at every drop (the one site that cares, the kill-roster listener in
+// the constructor) — never copied onto the player, so buyBackpackSlot()
+// below needs no live top-up loop the way buyMaxHp does: the very next
+// drop after purchase already sees the raised capacity, mid-run or not.
+function _blueprintCapacity(meta) {
+  return CFG.META_BLUEPRINT_CAPACITY + (meta.backpackSlot ? 1 : 0);
+}
+
+// D24: the backpack slot. Same shape as the four §4 purchases below —
+// double-purchase guard, spend, flip the flag — minus their live top-up
+// loop, for the reason _blueprintCapacity's own comment gives.
+Sim.prototype.buyBackpackSlot = function () {
+  if (this.meta.backpackSlot) return false;
+  var result = MetaLogic.spendOnBackpackSlot(this.meta.currency);
+  if (!result.ok) return false;
+  this.meta.currency = result.currency;
+  this.meta.backpackSlot = true;
   return true;
 };
 
@@ -5499,6 +6036,57 @@ Sim.prototype.buyParryReflect = function () {
   return true;
 };
 
+/* D15 (weapon equip & switch) — the real primitive. Same shape as
+ * buyMaxHp above: check preconditions, mutate, return success. Unlike a
+ * buyX purchase, this costs no currency and is always available once
+ * unlocked — a live gameplay action, not a shop transaction (design spec
+ * §4), which is also why it takes a playerIndex rather than applying
+ * uniformly to every player the way the buyX methods above do. */
+Sim.prototype.switchWeapon = function (playerIndex, weaponId) {
+  var player = this.players[playerIndex];
+  if (!player || !player.alive()) return false;
+  if (!player.canSwitchWeapon()) return false;
+  // Adversarially found: MetaLogic.isUnlocked() returns true unconditionally
+  // for ANY argument under Stage 1's own shipped default (enforceLocks
+  // false) — every pre-D15 caller only ever passed an id already known to
+  // be real (rollBlueprintDrop iterates DATA.WEAPON_IDS itself), so that
+  // contract was always safe until now. weaponId here is the first
+  // untrusted argument to reach isUnlocked — a real membership check,
+  // mirroring MetaLogic.sanitize()'s own DATA.WEAPON_IDS validation, is
+  // needed at this boundary too.
+  if (DATA.WEAPON_IDS.indexOf(weaponId) === -1) return false;
+  if (!MetaLogic.isUnlocked(this.meta, weaponId)) return false;
+  player.weapon = weaponId;
+  // Only player 0's switch updates the shared "what does a fresh run
+  // start on" value (design spec §3's own named judgment) — a co-op
+  // partner's live player.weapon is ordinary per-player state, untouched
+  // by this.
+  if (playerIndex === 0) this.meta.lastWeapon = weaponId;
+  this.bus.emit('weaponSwitch', { playerId: player.id, weaponId: weaponId });
+  return true;
+};
+
+// A thin wrapper — the only trigger v1 ships (design spec §4). Advances
+// to the next UNLOCKED id in DATA.WEAPON_IDS (already alphabetically
+// sorted, L4-deterministic), wrapping around. Terminates in at most
+// ids.length steps, including when the current weapon is the only
+// unlocked one — a safe no-op, never a crash or an infinite loop (a real,
+// reachable state: enforceLocks toggled true via F5 with nothing handed
+// in yet).
+Sim.prototype.cycleWeapon = function (playerIndex) {
+  var player = this.players[playerIndex];
+  if (!player) return false;
+  var ids = DATA.WEAPON_IDS;
+  var start = ids.indexOf(player.weapon);
+  if (start === -1) start = 0;
+  for (var step = 1; step <= ids.length; step++) {
+    var next = ids[(start + step) % ids.length];
+    if (next === player.weapon) return false;   // wrapped back to itself
+    if (MetaLogic.isUnlocked(this.meta, next)) return this.switchWeapon(playerIndex, next);
+  }
+  return false;
+};
+
 /* ------------------------------------------------------------ run loop
  * 60-run.js supplies pure decision/derivation functions; everything below
  * is the orchestration glue that actually touches World/Player/Enemy —
@@ -5512,9 +6100,9 @@ Sim.prototype.buyParryReflect = function () {
 //
 // A genuine restart, callable more than once on the same Sim, not just a
 // first-time initializer: explicitly clears runEndFrames/_pendingLevel/
-// _wasDead before handing off to _enterLevel(), which is what actually
+// _wasDead before handing off to _enterRoom(0, …), which is what actually
 // makes that true rather than merely claimed. An earlier draft left this
-// implicit — _enterLevel() resets everything IT touches, but a run-end
+// implicit — _enterRoom() resets everything IT touches, but a run-end
 // already in flight from a PRIOR call (an abandoned _pendingLevel computed
 // from the old seed, or a boss-victory runEndFrames countdown still
 // counting down) would otherwise survive a second beginRun() and later
@@ -5546,7 +6134,9 @@ Sim.prototype.beginRun = function (seed) {
     this._wasDead.push(false);
   }
   var levelSeed = RunLogic.deriveLevelSeed(this.run.runSeed, 0);
-  this._enterLevel(Gen.generate(levelSeed), levelSeed);
+  this.run.levelSeed = levelSeed;
+  var roomSeed0 = RunLogic.deriveRoomSeed(levelSeed, 0);
+  this._enterRoom(0, Gen.generate(roomSeed0, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS }));
   return this;
 };
 
@@ -5560,6 +6150,11 @@ Sim.prototype.loadFallback = function (world, spawns) {
   this._clearEntities();
   this.world = world;
   this.exit = null;
+  // Adversarially found: this used to leave this.tube exactly where the
+  // just-discarded room left it — a stale [x,y] from a world that no
+  // longer exists, surviving into the fallback room. Mirrors _enterBoss()'s
+  // own explicit this.tube = null right next to its own this.exit = null.
+  this.tube = null;
   this.spawns = spawns;
   this._relocatePlayers(spawns);
   return this;
@@ -5571,20 +6166,46 @@ Sim.prototype._clearEntities = function () {
   this.shots.length = 0;
   this.pickups.length = 0;
   this._levelRosterIds = [];
+  this._checkpointFired = false;
 };
 
-// `gen`/`levelSeed` are ALWAYS supplied by the caller (beginRun() computes
-// them fresh; _commitPendingLevel() below reuses ones already computed
-// eagerly at run-end) — this method never calls Gen.generate() itself, so a
-// level is never generated twice for the same transition.
-Sim.prototype._enterLevel = function (gen, levelSeed) {
+// room-checkpoint-structure spec: `_enterRoom(roomIndex, gen)` replaces the
+// old `_enterLevel(gen, levelSeed)` — a level is now a chain of
+// CFG.ROOM_COUNT combat rooms (indices 0..CFG.ROOM_COUNT-1) before the
+// boss, and this is the one entry point for all of them, room 0 included.
+// The caller is responsible for `this.run.levelSeed` already being correct
+// BEFORE this is called (beginRun()/_commitPendingLevel() both set it
+// fresh, immediately before calling this at roomIndex 0; every OTHER room
+// advance, from _stepRun() below, never touches levelSeed at all, since it
+// does not change mid-level) — this method only ever READS it, to derive
+// this room's own seed.
+//
+// `gen` is an OPTIONAL second param, self-generating via Gen.generate()
+// when omitted — NOT a convenience, a load-bearing distinction. Room 0 of
+// a fresh level is always handed an ALREADY-computed `gen`
+// (_beginRunEnd() eagerly precomputes it before a still-playing death
+// animation finishes, because _stepRun()'s own justDied branch reads
+// `this._pendingLevel.gen.spawn` to retarget a dying player's NEXT spawn
+// point before _commitPendingLevel() ever runs — self-generating here
+// would have nothing for that earlier read to read). Rooms 1..N-1 have no
+// such early-read consumer and always self-generate.
+Sim.prototype._enterRoom = function (roomIndex, gen) {
   this._clearEntities();
+  this.run.roomIndex = roomIndex;
+  this.run.phase = 'level';
+  var roomSeed = RunLogic.deriveRoomSeed(this.run.levelSeed, roomIndex);
+  if (!gen) gen = Gen.generate(roomSeed, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS });
   this.world = gen.world;
   this.exit = gen.exit;
-  this.run.levelSeed = levelSeed;
-  this.run.phase = 'level';
+  // Stamped BEFORE _relocatePlayers()/roster placement below, straight into
+  // the same gen.world this room is about to install — a real, small
+  // exception to D3's "procedural over hand-authored" for exactly the two
+  // points (§5 of the spec) this feature needs fixed geometry for, laid
+  // directly onto ground the D3a audit already proved reachable (the exit
+  // platform), not a separately-audited structure of its own.
+  this.tube = this._buildCheckpointAlcove(gen);
   // A co-op player joining (addPlayer(), F2) after this fires must land
-  // somewhere valid in THIS level, not the stale construction-time point —
+  // somewhere valid in THIS room, not the stale construction-time point —
   // a single-entry array, so every joiner lands at the same spot (a small,
   // named limitation: Gen.generate() only ever hands back one spawn point,
   // so this cannot offer a joiner their own distinct one the way a player
@@ -5596,24 +6217,156 @@ Sim.prototype._enterLevel = function (gen, levelSeed) {
     this.pickups.push(new Pickup(300 + i, gen.pickups[i][0], gen.pickups[i][1]));
   }
   // Tracked by id so isLevelClear() (see _stepRun() below) can tell THIS
-  // level's own roster apart from anything else that might also be sitting
+  // room's own roster apart from anything else that might also be sitting
   // in this.targets — a boot-path practice dummy, most concretely: it has
   // no template, is never meant to die, and lives in the exact same array.
   // Without this, an undying entity in targets would make isLevelClear()
-  // return false forever, and a level could never be cleared at all — a
+  // return false forever, and a room could never be cleared at all — a
   // real bug caught by driving this end to end in a real browser, not
   // assumed safe from the sim-only tests alone (none of which ever mixed a
   // Dummy into a beginRun()-driven roster). Not hashed separately: it is a
-  // pure function of already-hashed state (run.levelSeed plus addEnemy()'s
-  // own deterministic sequential id assignment), the same reasoning
-  // _pendingLevel.gen itself isn't hashed either.
-  var placed = RunLogic.placeEnemies(gen.platforms, RunLogic.deriveEnemySeed(levelSeed));
+  // pure function of already-hashed state (run.levelSeed/roomIndex plus
+  // addEnemy()'s own deterministic sequential id assignment), the same
+  // reasoning _pendingLevel.gen itself isn't hashed either.
+  //
+  // Seeded off roomSeed, NOT levelSeed directly — every room's own roster
+  // needs a distinct placement draw; salting straight off levelSeed the
+  // way the old single-room _enterLevel() did would hand every room in the
+  // same level the IDENTICAL enemy-placement seed, which is exactly the
+  // "several sequences colliding at the same distance from a shared root"
+  // bug class this file's own mix32 header already names as real, not
+  // hypothetical.
+  var placed = RunLogic.placeEnemies(gen.platforms, RunLogic.deriveEnemySeed(roomSeed));
   this._levelRosterIds = [];
   for (i = 0; i < placed.length; i++) {
     this._levelRosterIds.push(this.addEnemy(placed[i].tid, placed[i].x, placed[i].y, placed[i].seed).id);
   }
 
   this._relocatePlayers([gen.spawn]);
+};
+
+// Would stamping column `x` risk clipping a climb rising from some LOWER
+// platform? Used by _buildCheckpointAlcove() below to find out how far it
+// can safely widen the exit's own row.
+//
+// Two real, independently-found failure modes here, not one — the second
+// found ADVERSARIALLY, against the first version of this exact fix, not
+// assumed safe just because it fixed the first:
+// (1) a platform's own column, straight up — the original finding.
+// (2) CFG.CLIMB_CLEARANCE_TILES beyond a LOWER platform's edge (p.y >
+//     exitTileY — "lower" on screen, since y grows downward) on the side
+//     a climb from it would approach from. A rising jump drifts sideways
+//     WHILE still climbing (this game's own horizontal/vertical motion are
+//     independent — nothing couples them), so it can still be well below
+//     the exit's own row by the time its x has already carried it past the
+//     takeoff platform's own edge — reproduced directly: a real double-
+//     jump climb clipped the underside of a stamped ceiling four real
+//     tiles beyond the takeoff platform's own rightmost column, well past
+//     what the first version of this fix protected. A platform at or ABOVE
+//     the exit's own row (p.y <= exitTileY) has no such concern — nothing
+//     needs to climb THROUGH the exit's own height to reach it.
+function _columnRisksClimbCeiling(platforms, x, exitTileY) {
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (p.y === exitTileY) continue;                          // the exit's own row — fine to widen
+    if (p.y > exitTileY) {
+      // Lower platform: protect its own footprint AND a real climb-drift
+      // buffer around it, not just the exact column above it.
+      if (x >= p.x0 - CFG.CLIMB_CLEARANCE_TILES && x <= p.x1 + CFG.CLIMB_CLEARANCE_TILES) return true;
+    } else {
+      // Higher platform: its own column is still never safe to ceiling —
+      // a player already standing ON it must never have a new ceiling
+      // dropped directly overhead — but no climb-drift buffer is needed,
+      // nothing rises INTO it from below on the way to the exit.
+      if (x >= p.x0 && x <= p.x1) return true;
+    }
+  }
+  return false;
+}
+
+// The checkpoint alcove: a short, deliberately WIDE flat SOLID run stamped
+// directly onto `gen.world`, widening the exit's own row outward from its
+// own column. Two real points need to coexist on it without their own
+// interaction radii ever overlapping — the exit itself (CFG.RUN_EXIT_
+// RADIUS, the room-advance trigger) and the tube (CFG.TUBE_INTERACT_
+// RADIUS, the cinder-bank trigger, still to come) — which is why this
+// needs its own, wider constant (CFG.CHECKPOINT_ALCOVE_TILES) rather than
+// reusing CFG.GEN_MIN_FIGHT_TILES verbatim (tried first; the real numbers
+// do not leave both zones any clearance at that width once worked out on
+// paper).
+//
+// Adversarially found (real, reproduced with actual Sim physics, not
+// assumed safe): an earlier version of this method stamped every column in
+// the requested range unconditionally, INCLUDING columns that belonged to
+// some OTHER platform sitting at a different row — turning that platform's
+// own column into a ceiling directly above it. When the takeoff platform
+// for the exit's only incoming jump happened to sit under the stamped row,
+// this silently blocked the one path the D3a fairness audit had already
+// proven legal, in roughly a third of rooms fuzzed. Fixed by walking
+// outward from the exit's own column ONE tile at a time in each direction,
+// stopping the instant a column belongs to a different platform, rather
+// than skipping past it — the stamped run is always one CONTIGUOUS strip
+// of real, newly-solid ground with no gap a jump could land inside or the
+// tube could float above, and it can never turn someone else's platform
+// into a ceiling. This still needs no fairness audit of its own: every
+// stamped column was genuinely open air before this ran (never a column
+// D3a's own audit already relied on being open for some OTHER edge), so
+// nothing this method does can un-prove reachability the audit already
+// established.
+//
+// Returns the tube's own [x,y] anchor. Prefers CFG.TUBE_OFFSET_X to the
+// right of the exit (the historical default); if the contiguous run
+// stamped there doesn't leave that much clearance, tries the left side
+// instead; if neither side has room (a genuinely cramped alcove), falls
+// back to whichever side has more of it — always clamped to the actual
+// stamped run's own edge, never landing on ground this method didn't just
+// lay down.
+Sim.prototype._buildCheckpointAlcove = function (gen) {
+  var exitTileX = Math.round(gen.exit[0] / CFG.TILE);
+  var exitTileY = Math.round(gen.exit[1] / CFG.TILE);
+  var half = Math.floor(CFG.CHECKPOINT_ALCOVE_TILES / 2);
+  var minX = Math.max(1, exitTileX - half);
+  var maxX = Math.min(gen.world.w - 2, exitTileX + half);
+
+  // D17: a column at the exit's own row can now legitimately be a real,
+  // deliberately-placed TILE.HAZARD strip (flat-rise, same y as the exit
+  // platform) — nothing in `platforms` records a hazard strip, so
+  // _columnRisksClimbCeiling's own `p.y === exitTileY` "fine to widen" rule
+  // (it only ever looks at the platforms array) can't see it. Adversarially
+  // found, driven against real Gen.generate() output: without a guard, the
+  // alcove silently overwrites a hazard beat's own strip with SOLID
+  // whenever it lands on the exit's row, erasing the capability D17 just
+  // spent — never a fairness problem (SOLID is strictly easier than
+  // HAZARD), but a real, silent feature defeat.
+  //
+  // Deliberately checks for HAZARD specifically, not "must be EMPTY" — a
+  // first version required strict emptiness, which also stopped widening
+  // through a column that was already SOLID from some OTHER same-row
+  // platform (a real, common case _columnRisksClimbCeiling's own
+  // `p.y === exitTileY` rule already correctly treats as safe, and setting
+  // an already-solid tile to solid again is a harmless no-op) — a real
+  // regression, caught by an existing test (verify_run.js's "the full,
+  // ideal offset is real, reachable placement code" going 0/30 once the
+  // over-broad guard made the ideal-offset branch unreachable). Only
+  // HAZARD is the new case with no platforms-array representation; every
+  // other tile kind's safety is exactly what _columnRisksClimbCeiling
+  // already decides, unchanged.
+  var x1 = exitTileX;
+  while (x1 < maxX && gen.world.get(x1 + 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x1 + 1, exitTileY)) x1++;
+  var x0 = exitTileX;
+  while (x0 > minX && gen.world.get(x0 - 1, exitTileY) !== World.TILE.HAZARD &&
+    !_columnRisksClimbCeiling(gen.platforms, x0 - 1, exitTileY)) x0--;
+  for (var x = x0; x <= x1; x++) gen.world.set(x, exitTileY, World.TILE.SOLID);
+
+  var needed = CFG.TUBE_OFFSET_X;
+  var rightRoom = x1 * CFG.TILE - gen.exit[0];
+  var leftRoom = gen.exit[0] - x0 * CFG.TILE;
+  var tubeX;
+  if (rightRoom >= needed) tubeX = gen.exit[0] + needed;
+  else if (leftRoom >= needed) tubeX = gen.exit[0] - needed;
+  else tubeX = rightRoom >= leftRoom ? x1 * CFG.TILE : x0 * CFG.TILE;
+  return [tubeX, gen.exit[1]];
 };
 
 /* Every place this file moves the whole player roster to a new point shares
@@ -5652,8 +6405,9 @@ Sim.prototype._enterBoss = function () {
   this._clearEntities();
   this.world = Boss.arena();
   this.exit = null;             // the arena has no exit concept — a true fact, not a phase flag
+  this.tube = null;             // nor a tube — same reasoning, room-checkpoint-structure spec
   this.run.phase = 'boss';
-  this.spawns = [Boss.playerSpawn];   // same reasoning as _enterLevel()'s own spawns update
+  this.spawns = [Boss.playerSpawn];   // same reasoning as _enterRoom()'s own spawns update
 
   var bossSeed = RunLogic.deriveBossSeed(this.run.levelSeed);
   this.bossTarget = this.addEnemy(Boss.template, Boss.spawn[0], Boss.spawn[1], bossSeed);
@@ -5689,13 +6443,20 @@ Sim.prototype._enterBoss = function () {
 Sim.prototype._beginRunEnd = function (victory) {
   var newRunSeed = RunLogic.nextRunSeed(this.run.runSeed, this.run.runsCompleted);
   var levelSeed = RunLogic.deriveLevelSeed(newRunSeed, 0);
+  var roomSeed0 = RunLogic.deriveRoomSeed(levelSeed, 0);
   // `victory` rides along on _pendingLevel itself rather than a separate
   // field — like gen/levelSeed, it is a pure function of already-hashed
   // state at the moment this fires (which branch of _stepRun() called this
   // at all is itself derived from hashed player/boss state), so it needs
   // no hash() coverage of its own, the same reasoning hash()'s own comment
-  // already gives for _pendingLevel's other fields.
-  this._pendingLevel = { gen: Gen.generate(levelSeed), levelSeed: levelSeed, runSeed: newRunSeed, victory: victory };
+  // already gives for _pendingLevel's other fields. `gen` is now the NEXT
+  // level's own room 0, room-bounded (CFG.ROOM_BEATS/ROOM_PICKUPS) — see
+  // _enterRoom()'s own comment for why this still has to be precomputed
+  // eagerly rather than deferred to when it's actually installed.
+  this._pendingLevel = {
+    gen: Gen.generate(roomSeed0, { beats: CFG.ROOM_BEATS, pickups: CFG.ROOM_PICKUPS }),
+    levelSeed: levelSeed, runSeed: newRunSeed, victory: victory
+  };
 };
 
 Sim.prototype._commitPendingLevel = function () {
@@ -5719,36 +6480,7 @@ Sim.prototype._commitPendingLevel = function () {
   // the PERMANENT pool first, so an unlock attempted the SAME tick a boss
   // bonus lands can actually spend it.
   this.meta.currency += earned;
-  var handedIn = [];
-  for (var hi = 0; hi < this.players.length; hi++) {
-    var carrier = this.players[hi];
-    if (!carrier.alive() || !carrier.carriedBlueprint) continue;
-    var weaponId = carrier.carriedBlueprint;
-    // Recorded HERE, before either branch below — every carry consumed at
-    // this transition belongs in handedIn, including the case a SECOND
-    // carrier of the identical still-locked weapon hits (the first
-    // carrier processed this same loop already unlocked it, so
-    // isUnlocked() below correctly makes THIS spend a no-op) and the
-    // unaffordable case further down. An earlier draft pushed only inside
-    // those two branches and silently dropped this one — a real,
-    // adversarially-found gap: the carry slot empties either way (the
-    // resetTransient() pass below clears it unconditionally), so the
-    // event payload must say so either way too, not just report the
-    // subset that also happened to spend currency.
-    handedIn.push(weaponId);
-    if (MetaLogic.isUnlocked(this.meta, weaponId)) continue;   // nothing to spend on
-    var result = MetaLogic.spendOnUnlock(this.meta.currency);
-    if (result.ok) {
-      this.meta.currency = result.currency;
-      this.meta.unlocked[weaponId] = true;
-      this.bus.emit('blueprintUnlocked', { id: weaponId, playerId: carrier.id });
-    }
-    // An unaffordable hand-in is a real, named simplification, not a
-    // banked-for-later queue: the blueprint is spent either way (the
-    // carry slot always empties at this transition, matching D4's own
-    // "hand in AT a transition" as something that happens TO the
-    // blueprint here, not something the player separately chooses).
-  }
+  var handedIn = this._handInCarriedBlueprints();
 
   // D2: "each stat starts at 1 every run." This is the moment the game's
   // own bookkeeping calls a new run (runsCompleted just advanced) — every
@@ -5764,9 +6496,12 @@ Sim.prototype._commitPendingLevel = function () {
   // precedent _relocatePlayers() already set for not force-touching a
   // player who is not done dying yet — their own natural respawn already
   // calls resetTransient() on their own schedule, so nothing here needs to
-  // race it. resetTransient() also clears carriedBlueprint (already read
-  // and resolved above) — "handed in" and "cleared" are the same reset,
-  // not two separate steps to keep in sync.
+  // race it. resetTransient() ALSO clears carriedBlueprint, redundantly —
+  // _handInCarriedBlueprints() above already self-clears it (a real
+  // requirement once a checkpoint's own mid-level call site has no reset
+  // sweep of its own to piggyback on; see that method's header) — so this
+  // is a harmless no-op re-clear of an already-null field here, not the
+  // only place it happens the way an older draft of this comment claimed.
   for (var i = 0; i < this.players.length; i++) {
     if (this.players[i].alive()) {
       this.players[i].resetTransient();
@@ -5780,7 +6515,98 @@ Sim.prototype._commitPendingLevel = function () {
   // the FINAL values for this transition, not a mid-resolution snapshot.
   this.bus.emit('runEnd', { currency: this.meta.currency, handedIn: handedIn });
 
-  this._enterLevel(pending.gen, pending.levelSeed);
+  this.run.levelSeed = pending.levelSeed;
+  this._enterRoom(0, pending.gen);
+};
+
+// Extracted so the checkpoint path (_onRoomClear(), below) can hand in a
+// carried blueprint at EVERY room clear, not only at a true run-end — D4's
+// own "at a transition" language, and a checkpoint genuinely is one (spec
+// §7d). SELF-CONTAINED: clears carrier.carriedBlueprint itself (rather
+// than relying on a caller's own later resetTransient() sweep the way the
+// original inline loop implicitly did) — the run-end call site still has
+// that sweep right after this returns (a harmless re-clear of an already-
+// null field, see its own comment), but the checkpoint call site has NO
+// such sweep (a room transition uses teleport(), which deliberately
+// preserves carriedBlueprint — "a live transition is not a death"), so
+// this method must be correct on its own at both call sites, not correct
+// only because of what happens to run afterward at one of them.
+Sim.prototype._handInCarriedBlueprints = function () {
+  var handedIn = [];
+  for (var hi = 0; hi < this.players.length; hi++) {
+    var carrier = this.players[hi];
+    if (!carrier.alive()) continue;
+    // D24: every item carried, in acquisition (array) order — so a player
+    // carrying two different locked blueprints and short on currency for
+    // both opportunistically unlocks whichever they found FIRST. Not a
+    // rule designed around; the natural consequence of FIFO push order.
+    for (var ci = 0; ci < carrier.carriedBlueprints.length; ci++) {
+      var weaponId = carrier.carriedBlueprints[ci];
+      // Recorded HERE, before either branch below — every carry consumed at
+      // this transition belongs in handedIn, including the case a SECOND
+      // copy of the identical still-locked weapon hits (whether a second
+      // carrier, or D24's second slot on the same carrier — the first copy
+      // processed this same loop already unlocked it, so isUnlocked()
+      // below correctly makes THIS spend a no-op) and the unaffordable
+      // case further down. An earlier draft pushed only inside those two
+      // branches and silently dropped this one — a real, adversarially-
+      // found gap: the carry slot empties either way, so the event payload
+      // must say so either way too, not just report the subset that also
+      // happened to spend currency.
+      handedIn.push(weaponId);
+      if (MetaLogic.isUnlocked(this.meta, weaponId)) continue;   // nothing to spend on
+      var result = MetaLogic.spendOnUnlock(this.meta.currency);
+      if (result.ok) {
+        this.meta.currency = result.currency;
+        this.meta.unlocked[weaponId] = true;
+        this.bus.emit('blueprintUnlocked', { id: weaponId, playerId: carrier.id });
+      }
+      // An unaffordable hand-in is a real, named simplification, not a
+      // banked-for-later queue: the blueprint is spent either way (the
+      // carry slot always empties at this transition, matching D4's own
+      // "hand in AT a transition" as something that happens TO the
+      // blueprint here, not something the player separately chooses).
+    }
+    carrier.carriedBlueprints = [];
+  }
+  return handedIn;
+};
+
+// room-checkpoint-structure spec §7: the checkpoint orchestrator, all four
+// things it does (§7a-d) firing together as one atomic moment. Called from
+// _stepRun() the instant this room's roster clears — deliberately
+// INDEPENDENT of whether a player has reached the exit yet (see this
+// file's own header comment on why that separation is load-bearing: it is
+// what gives the player a real, player-paced window to walk to the tube
+// and bank cinders before ever leaving the room). §7a (the door
+// "unlocking") is not a separate flag here — reaching the exit while
+// already clear is what _stepRun()'s own advance check already does.
+Sim.prototype._onRoomClear = function () {
+  if (this._checkpointFired) return;   // once per room, not once per tick it stays true
+  this._checkpointFired = true;
+  var healed = this._healAtCheckpoint();
+  var handedIn = this._handInCarriedBlueprints();
+  this.bus.emit('checkpoint', { roomIndex: this.run.roomIndex, healed: healed, handedIn: handedIn });
+};
+
+// §7c's partial heal — a fraction of MISSING hp, not of max hp, so a
+// checkpoint reached at full health correctly heals nothing rather than
+// wasting a flat number on a player who needed none of it. Returns the
+// total actually healed (summed across every alive player) purely for the
+// checkpoint event's own payload — nothing reads the return value to
+// decide behavior.
+Sim.prototype._healAtCheckpoint = function () {
+  var total = 0;
+  for (var i = 0; i < this.players.length; i++) {
+    var p = this.players[i];
+    if (!p.alive()) continue;
+    var missing = p.maxHp - p.hp;
+    if (missing <= 0) continue;
+    var amount = Math.ceil(missing * CFG.CHECKPOINT_HEAL_FRAC);
+    p.hp += amount;
+    total += amount;
+  }
+  return total;
 };
 
 /* The tail of step(), only ever reached once beginRun() has actually
@@ -5825,8 +6651,10 @@ Sim.prototype._stepRun = function () {
       // The clearing itself still happens naturally at resetTransient();
       // this is only the notification, the same "state IS the signal"
       // shape 60-run.js's own header already uses for phase transitions.
-      if (this.players[i].carriedBlueprint) {
-        this.bus.emit('blueprintLost', { id: this.players[i].carriedBlueprint, playerId: this.players[i].id });
+      // D24: one event per carried item, same payload shape as before — no
+      // consumer of 'blueprintLost' needs to change.
+      for (var bi = 0; bi < this.players[i].carriedBlueprints.length; bi++) {
+        this.bus.emit('blueprintLost', { id: this.players[i].carriedBlueprints[bi], playerId: this.players[i].id });
       }
     }
     if (!isDead && this._wasDead[i]) {
@@ -5870,6 +6698,16 @@ Sim.prototype._stepRun = function () {
   // reaching the exit in the meantime must not open a boss door onto a run
   // that is in the middle of concluding.
   if (this.run.phase === 'level' && !justDied && !this._pendingLevel) {
+    // room-checkpoint-structure spec (decision 2): the checkpoint fires the
+    // instant the roster clears, INDEPENDENT of atExit below — a player
+    // still fighting on the far side of the room from the door gets healed/
+    // handed-in/saved/narrated the moment the last enemy dies, not only
+    // once they happen to walk to the exit. Advancing to the NEXT room
+    // still requires both, unchanged from how the level->boss check has
+    // always worked.
+    var roomClear = RunLogic.isLevelClear(this._roster());
+    if (roomClear) this._onRoomClear();
+
     var atExit = false, p, b, cx, cy;
     for (i = 0; i < this.players.length; i++) {
       p = this.players[i];
@@ -5878,11 +6716,14 @@ Sim.prototype._stepRun = function () {
       cx = b.x + b.w / 2; cy = b.y + b.h / 2;
       if (RunLogic.reachedExit(cx, cy, this.exit, CFG.RUN_EXIT_RADIUS)) { atExit = true; break; }
     }
-    if (atExit && RunLogic.isLevelClear(this._roster())) this._enterBoss();
+    if (atExit && roomClear) {
+      if (this.run.roomIndex + 1 < CFG.ROOM_COUNT) this._enterRoom(this.run.roomIndex + 1);
+      else this._enterBoss();
+    }
   }
 };
 
-// This level's own real roster only — see _enterLevel()'s own comment on
+// This room's own real roster only — see _enterRoom()'s own comment on
 // _levelRosterIds for why anything else living in this.targets (a boot-path
 // practice dummy, most concretely) must never be allowed to affect "clear".
 Sim.prototype._roster = function () {
@@ -5916,8 +6757,17 @@ Sim.prototype.hash = function () {
     // a stringified World a second time would only ever re-prove what the
     // seed already fully determines.
     this.run.phase, this.run.runSeed, this.run.levelSeed, this.run.currency,
-    this.run.runsCompleted, this.run.kills,
+    this.run.runsCompleted, this.run.kills, this.run.roomIndex,
     this.exit ? this.exit[0] : -1, this.exit ? this.exit[1] : -1,
+    // this.tube, position not just presence — the identical reasoning
+    // this.exit's own two lines above already state. Adversarially found:
+    // an earlier draft left this out of hash() entirely, reasoning it was
+    // a pure function of already-hashed state (true today, since
+    // _buildCheckpointAlcove()'s own inputs are all already hashed) — but
+    // that reasoning is exactly as fragile as NOT hashing this.exit itself
+    // would be, and costs nothing to just hash directly instead of
+    // re-deriving and trusting.
+    this.tube ? this.tube[0] : -1, this.tube ? this.tube[1] : -1,
     this.bossTarget ? this.bossTarget.id : -1,
     this.runEndFrames,
     // Meta progression (65-meta.js). All four affect FUTURE ticks: currency
@@ -5928,11 +6778,21 @@ Sim.prototype.hash = function () {
     // Object.keys(this.meta.unlocked) — a plain object's own key order is
     // insertion-dependent, not a source of truth this hash can lean on.
     this.meta.currency, this.meta.maxHpBonus, this.meta.enforceLocks ? 1 : 0,
+    // D15: affects a FUTURE tick's reset (_applyMetaToPlayer) — the same
+    // "hash a value directly rather than trust it's a pure re-derivation"
+    // bar this.tube's own comment above already sets. No `=== undefined`
+    // guard needed here (unlike the per-player p.weapon hash line below) —
+    // this.meta always comes from MetaLogic.sanitize()/defaults(), never a
+    // bare unsanitized object.
+    this.meta.lastWeapon,
     // Ability enhancements (§4): all four decide FUTURE ticks (whether a
     // future dash/parry/stagger gets the enhanced behavior), the same
     // "affects later ticks" bar the three fields above already hold to.
     this.meta.dashExtraCharge ? 1 : 0, this.meta.dashExtIframes ? 1 : 0,
-    this.meta.parryRiposte ? 1 : 0, this.meta.parryReflect ? 1 : 0
+    this.meta.parryRiposte ? 1 : 0, this.meta.parryReflect ? 1 : 0,
+    // D24: decides the very next drop's capacity — same "affects later
+    // ticks" bar as the four flags above.
+    this.meta.backpackSlot ? 1 : 0
   ], i, p, b, t;
   for (i = 0; i < DATA.WEAPON_IDS.length; i++) {
     out.push(this.meta.unlocked[DATA.WEAPON_IDS[i]] ? 1 : 0);
@@ -5953,7 +6813,7 @@ Sim.prototype.hash = function () {
       p.attack ? p.attack.id : '-', p.attack ? p.attack.frame : -1,
       p.attack ? p.attack.hits.length : 0, p.actionLock,
       p.weapon === undefined ? '-' : p.weapon,
-      p.carriedBlueprint === undefined || p.carriedBlueprint === null ? '-' : p.carriedBlueprint,
+      p.carriedBlueprints && p.carriedBlueprints.length ? p.carriedBlueprints.join(',') : '-',   // D24: order-sensitive on purpose
       p.wallJumpLock === undefined ? 0 : p.wallJumpLock,
       p.ledgeGrabLock === undefined ? 0 : p.ledgeGrabLock,
       p.ledgeHang === undefined ? 0 : p.ledgeHang,
@@ -5979,6 +6839,14 @@ Sim.prototype.hash = function () {
       // left open at the time; closed here rather than left to linger.
       t.phase === undefined ? 0 : t.phase,
       t.activeMove ? t.activeMove.id : '-',
+      // D16: Caller-only field, '0' for every regular template and the
+      // boss — the SAME parity with phase/activeMove this field's own
+      // resetTransient() comment already claims; adversarially found that
+      // the claim wasn't actually true until this line existed. Affects
+      // FUTURE ticks (callIn()'s own >= guard), the same "hash it
+      // directly rather than trust it's re-derivable" bar this.tube/
+      // meta.lastWeapon already hold to above.
+      t.summonsUsed === undefined ? 0 : t.summonsUsed,
       b.x, b.y, b.vx, b.vy, b.onGround ? 1 : 0
     );
   }
@@ -6857,6 +7725,12 @@ Narrative.prototype.subscribe = function (bus) {
   this._subscribed = true;
   var self = this;
   bus.on('telegraph', function (e) { self._bark(e.tid); });
+  // D21: 'checkpoint' (70-sim.js's own _onRoomClear()) is already a real,
+  // whitelisted Bus event, added by D14 with a declared consumer here that
+  // was never wired up until now — zero new CFG, zero new Bus event, zero
+  // sim-file change. Reuses _say()/LINE_TTL_MS verbatim; no payload
+  // branching on healed/handedIn (v2, named out of scope in the spec).
+  bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });
   return this;
 };
 
@@ -7318,7 +8192,8 @@ var DEFAULT_KEYS = {
   jump: ['Space', 'KeyK'],
   roll: ['ShiftLeft', 'ShiftRight', 'KeyL'],
   attack: ['KeyJ'],
-  parry: ['KeyU']
+  parry: ['KeyU'],
+  switchWeapon: ['KeyI']
 };
 
 // A KeyboardEvent.code is always alphanumeric (ArrowLeft, Space, Digit1,
@@ -8398,7 +9273,12 @@ function saveMeta(meta) {
  * Standard gamepad mapping. Face button 0 jumps, 1 and 5 roll (B and RB, so
  * both thumb and shoulder work), 2 attacks, 3 parries (abilities spec §2b —
  * the next free face button, same grouping as the other three core actions),
- * dpad 12-15 and the left stick both steer.
+ * dpad 12-15 and the left stick both steer. Button 4 (LB) switches weapons
+ * (D15) — confirmed genuinely unused by anything else in this codebase
+ * before this. Only ever translates hardware into pad.set() calls, the
+ * exact same shape every other action here already uses — the actual
+ * consume-and-act decision lives in the SIM layer (Sim.prototype.step's
+ * own phase 0), never here, so a scripted test never needs a fake gamepad.
  * ======================================================================== */
 function pollGamepad(pad, gp) {
   if (!gp) return;
@@ -8412,6 +9292,7 @@ function pollGamepad(pad, gp) {
   pad.set('roll', !!((gp.buttons[1] && gp.buttons[1].pressed) || (gp.buttons[5] && gp.buttons[5].pressed)));
   pad.set('attack', !!(gp.buttons[2] && gp.buttons[2].pressed));
   pad.set('parry', !!(gp.buttons[3] && gp.buttons[3].pressed));
+  pad.set('switchWeapon', !!(gp.buttons[4] && gp.buttons[4].pressed));
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -8477,6 +9358,18 @@ function boot(canvas, hud, seed) {
   // a timer or every frame — _commitPendingLevel() only fires at a real
   // D4 "transition."
   sim.bus.on('runEnd', function () { saveMeta(sim.meta); });
+  // D15 (weapon equip & switch): meta.lastWeapon is a real, frequently-
+  // mutated, player-facing preference (Sim.prototype.switchWeapon writes
+  // it the instant player 0 switches) — unlike F5-F10's debug-only fields,
+  // it can be changed many times in an ordinary session with no run-end
+  // anywhere nearby. Without a dedicated save hook, this is the exact
+  // "mutated in memory but silently reverted by an ordinary reload" gap
+  // this file's own F5/F6 comment above already documents and fixed once
+  // for those two fields — adversarially found again here, fixed the same
+  // way: save immediately, gated to player 0's own switch (the only one
+  // that actually touches shared meta; a co-op partner's own live
+  // player.weapon is per-player and never persisted).
+  sim.bus.on('weaponSwitch', function (e) { if (e.playerId === sim.players[0].id) saveMeta(sim.meta); });
 
   // A silent practice dummy near spawn, before anything that fights back —
   // boot-path flavor, not part of 60-run.js's own roster (a Dummy is a
@@ -8491,7 +9384,7 @@ function boot(canvas, hud, seed) {
   // forever — a real bug an earlier draft of this exact change had, caught
   // by driving it end to end in a real browser rather than assumed safe.
   // NOT actually permanent, though, an earlier version of this comment's
-  // own overclaim, caught adversarially: both _enterLevel() and
+  // own overclaim, caught adversarially: both _enterRoom() and
   // _enterBoss() unconditionally clear this.targets on every transition,
   // this dummy included, and nothing ever re-adds it — it survives only
   // until the player walks through the very first exit. Left as-is rather
@@ -8733,6 +9626,23 @@ function boot(canvas, hud, seed) {
     if (e.code === 'F8') { if (sim.buyDashExtIframes()) saveMeta(sim.meta); }
     if (e.code === 'F9') { if (sim.buyParryRiposte()) saveMeta(sim.meta); }
     if (e.code === 'F10') { if (sim.buyParryReflect()) saveMeta(sim.meta); }
+    if (e.code === 'F12') { if (sim.buyBackpackSlot()) saveMeta(sim.meta); }   // D24
+    // D16 (summon-primitive spec §6): debug-only Caller spawn, a fixed
+    // distance in front of player 0 — the same direct sim.addEnemy() call
+    // the boot-path Dummy already makes via sim.addTarget() above,
+    // bypassing ctx entirely. Real procedural placement (50-gen.js) stays
+    // explicitly out of scope for v1 (spec §6/§9).
+    //
+    // Adversarially found: unlike F2's own guard on this exact repeat-key
+    // shape (sim.players.length < 2) or F7-F10's self-guarding buyX()
+    // calls, a held F11 (real OS key-repeat) had nothing stopping it from
+    // spawning an unbounded stream of full-hp Callers. Capped the same way
+    // F2 caps co-op join — a small live count, not a session total, so the
+    // key stays usable for testing more than one at a time.
+    if (e.code === 'F11' && sim.targets.filter(function (t) { return t.tid === 'caller' && t.alive(); }).length < 3) {
+      var pb = sim.players[0].body;
+      sim.addEnemy(C.Caller.template, pb.x + 80, pb.y);
+    }
   });
   window.addEventListener('keyup', function (e) {
     if (app.paused) return;
@@ -8914,6 +9824,8 @@ function boot(canvas, hud, seed) {
     if (gp.buttons[13] && gp.buttons[13].pressed) pad.set('down', true);
     // Same face button 3 pollGamepad's own co-op mapping uses for parry.
     if (gp.buttons[3] && gp.buttons[3].pressed) pad.set('parry', true);
+    // Same button 4 pollGamepad's own co-op mapping uses for switchWeapon (D15).
+    if (gp.buttons[4] && gp.buttons[4].pressed) pad.set('switchWeapon', true);
   }
 
   // Takes the View, not the raw canvas: it needs cssW, the LOGICAL width, to

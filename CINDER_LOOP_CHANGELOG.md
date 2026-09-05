@@ -5,6 +5,668 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.22 — 2026-08-31 — Roll-crossable hazard beats + the roll wall-leniency prerequisite, 5 adversarially-found bugs fixed (D17)
+
+**GREEN: 2654/2654 assertions across 17 suites (`verify_move` grew from
+202 to 226, `verify_gen` grew from 60 to 79 — no new suite).
+`cinder-loop.html`, 457,222 bytes.** `CFG.GEN_ROLL_HAZARD_TILES`
+(`00-core.js`) has been a real, measured capability constant — "ground-
+level hazard strip crossable via roll: measured 85.5px = 5.34 tiles" —
+with zero consumers anywhere in the codebase since it was written. D17
+(`docs/superpowers/specs/2026-08-25-hazard-beats-design.md`, approved
+2026-08-25) finally spends it: `CFG.GEN_HAZARD_BEAT_CHANCE` (0.15, new)
+is a per-beat roll in `generateCandidate`'s main loop that places a
+flat-rise gap wider than a normal jump can cross but within Roll's own
+measured reach, stamped as a real `TILE.HAZARD` strip a player must
+actually roll across. Two coupled pieces shipped together, in three
+commits — the second could not have worked without the first.
+
+**Part A, the physics prerequisite the approved design did not know it
+needed.** The original spec assumed a flat-rise gap was roll-crossable on
+distance margin alone. Verified false during implementation, not assumed
+sufficient: the real, unmodified collision model
+(`Body.prototype.move`/`moveX`, `25-body.js` — X resolves fully before Y
+every sub-step) blocks ANY flat-rise roll from ever landing on a far
+platform, at any gap size 1-8, regardless of whether the far tile is
+`SOLID` or `ONEWAY`. A roll starts with zero vertical velocity flush
+against the ground, so gravity sinks its own hitbox into the shared row
+within 1-2 ticks — long before it can have crossed even a one-tile gap
+horizontally (~3.4 ticks at Roll's fixed speed). Fixed with two new
+`Body` fields, `wallLeniency`/`leaveRow` (`25-body.js:32-39`), inert for
+every entity that never sets them: `moveX` (`25-body.js:69-80`) gains one
+new skip condition, sibling to its existing `ONEWAY` skip, that does not
+treat a `SOLID` tile at row `ty` as a wall if `body.wallLeniency && ty
+=== body.leaveRow`. Only `Player.prototype.update`'s grounded-roll-entry
+branch (`30-player.js:547-552`) ever arms it — `b.leaveRow =
+world.tileY(b.bottom()); b.wallLeniency = true;`, at the instant a
+grounded roll begins — and `Player.prototype.endRoll`
+(`30-player.js:751-755`) disarms both fields the instant that specific
+roll ends, so the exemption can never outlive the roll that armed it.
+Roll-only, not Dash (Dash only ever triggers airborne, so it has no
+grounded "row it just left" in the same sense); structurally inert for
+every enemy, since no `'roll'`/`'dash'` state exists anywhere in
+`45-enemy.js`. A known, accepted trade-off, named in the spec itself: the
+exemption fires for ANY flat-rise gap a roll departs across, anywhere in
+the game, not only generator-placed hazard beats — the correct,
+desired consequence of fixing a real capability gap, not a leak.
+
+**Part B, the hazard beat itself.** A new `hazardEdgeAllowed(a, b)`
+(`50-gen.js`) — deliberately its own function, not folded into the
+existing `edgeAllowed`, the same "don't conflate two different
+capabilities into one edge test" discipline `edgeAllowed`'s own header
+comment already names as the lesson from an earlier, already-fixed bug —
+requires `a.y === b.y` (flat-rise only) and a gap in
+`(GEN_FLAT_GAP_TILES, GEN_ROLL_HAZARD_TILES]`. `buildGraph` gains an
+optional second parameter, `hazardEdges`, that independently
+RE-validates each recorded pair via `hazardEdgeAllowed` before adding it
+to the graph BIDIRECTIONALLY — a deliberate departure from the directed
+jump-edge model, since flat-rise roll-crossability is genuinely symmetric
+by construction, never trusting the generator's own bookkeeping that a
+pair it meant to place actually is one ("THE AUDIT IS THE POINT," this
+file's own header). `placeHazardBeat` places the gap and the far
+platform; the main-beat loop caps it at one per candidate and excludes
+the very first and very last beat of every candidate (the player's first
+action off spawn, or a blind hazard crossing gating the exit — both
+adversarially found, not part of the original design). `audit()` also
+now rejects a candidate where any OTHER platform's own footprint would
+overlap a hazard beat's stamped gap span. `stamp()` places one row of
+`TILE.HAZARD` per recorded hazard edge, mirroring the existing death-row
+convention. `tests/harness.js` gains `attemptRoll`, a real-player,
+real-sim-tick physics prover for a roll crossing, sibling to the existing
+jump-edge `attemptHop`/`attemptHopWith`; `verify_gen.js` feeds every real
+`hazardEdges` pair produced across a 60-seed sweep through it, confirming
+every real generated hazard edge is physically crossable with zero damage
+taken — not just trusting the isolated 85.5px measurement that originally
+produced the constant.
+
+**Five real production bugs found and fixed:**
+
+1. **An RNG-stream determinism bug (L4).** An earlier version of the
+   per-beat hazard roll gated the draw itself behind `!hazardPlaced &&`,
+   which short-circuits in JS — every beat after a candidate's own hazard
+   placement silently consumed one fewer RNG draw than the surrounding
+   comment claimed, breaking "same seed → same sequence of attempts" the
+   same way `risky` in `placeMainBeat`/`placeSpur` already avoids. Caught
+   by diffing against a hoisted-roll variant on real seeds. Fixed by
+   drawing the roll unconditionally every beat, regardless of whether the
+   cap is already spent or the beat is excluded by position.
+2. **No exclusion for the first/last beat.** Not part of the original
+   design — a hazard beat could land as the player's very first action
+   off spawn (zero warm-up) or as the final approach to the exit (gating
+   it behind a blind crossing). Fixed with `i > 0 && i < beats - 1`.
+3. **`audit()` had no check for a hazard beat's stamped gap span
+   overlapping another platform's own footprint.** `stamp()` overwrites
+   that span with `TILE.HAZARD`; `placeSpur` has no awareness of
+   `hazardEdges` and can anchor a spur — including a pickup-bearing one —
+   inside that span. `reach[]` had already certified the spur reachable
+   from PRE-stamp geometry, before its own solid ground silently became
+   hazard — real in roughly one in twenty candidates that place a hazard
+   beat at all. Fixed with a new overlap check in `audit()`.
+4. **A real cross-feature interaction with D14: `_buildCheckpointAlcove`
+   (`70-sim.js`) could silently overwrite a hazard strip with SOLID
+   ground.** The exit-row widening walk already stops at another
+   platform's own column, but nothing in the `platforms` array records a
+   hazard strip, so `_columnRisksClimbCeiling` (which only ever inspects
+   `platforms`) had no way to see one. Never a fairness problem (SOLID is
+   strictly easier than HAZARD) but a real, silent feature defeat —
+   erasing the capability D17 just spent whenever the widened run
+   overlapped a hazard gap sharing the exit's row. Fixed by stopping the
+   widening walk at a `TILE.HAZARD` tile the same way it already stops at
+   another platform's column.
+5. **Bug 4's own first fix caused a real regression.** A first version
+   required strict emptiness (not just "not HAZARD"), which also stopped
+   widening through a column that was already SOLID from some OTHER
+   same-row platform — a real, common case `_columnRisksClimbCeiling`'s
+   own rule already treats as safe. Caught by an EXISTING test
+   (`verify_run.js`'s "the full, ideal offset is real, reachable
+   placement code" dropping from its measured 30% to 0%). Fixed by
+   checking for `TILE.HAZARD` specifically, not "must be empty."
+
+**Two real coverage gaps closed alongside the bugs above.**
+`tests/verify_run.js`'s own pre-existing checkpoint-alcove regression
+test never passed `hazardEdges` through to `Gen.buildGraph` — silently
+excluding from its own sample any room whose only approach to the exit
+was itself a hazard-beat crossing, the exact blind spot that let bug 4
+above ship undetected in the first place. And the wall-leniency tests'
+own first draft never actually exercised a wall WHILE the exemption was
+armed — both the "genuine multi-row wall" and "exemption expires" cases
+place their wall well past Roll's own fixed travel range, so the
+row-scoping guarantee itself (exactly `leaveRow`, not every row a rolling
+body's hitbox happens to touch) went unverified; a regression to
+exempting every armed row would have shipped green through the whole
+file. Closed with a direct `Body`/`moveX` test driving the real
+collision code against walls one row above, at, and one row below
+`leaveRow`, confirmed to actually flip red against that exact mutation
+before being trusted.
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2654/2654 assertions across 17 suites**, `cinder-loop.html` at
+457,222 bytes. One unrelated pre-existing test (a narrow-spur jump-
+landing case the physics prover's five strategies don't reliably cover)
+had its hardcoded sample seed swapped from 34 to 35 after the new
+per-beat RNG draw reshuffled seed 34's own generated layout into that
+same pre-existing hard case — confirmed via direct reproduction (all 5
+strategies fail that one pair in isolation) to be nothing this release's
+own logic caused.
+
+**What was deliberately not done here.** Any rise other than 0 for a
+hazard beat (flat-rise only — a roll's own gravity accumulation makes any
+real rise unmeasured territory). Hazard beats on spurs — main-path only.
+More than one hazard beat per generated candidate. Ember Dash crossing
+the same strip (only Roll's 85.5px distance is actually measured; Dash
+parity is an assumption, not a measurement, and a real separate
+follow-up). Any change to `edgeAllowed`, `maxGapForRise`,
+`minGapForRise`, or any existing jump-capability constant — hazard beats
+are strictly additive. Reacting to hazard-beat placement in room-
+checkpoint narration or telemetry.
+
+---
+
+## v0.2.21 — 2026-08-25 — Checkpoint narration: 82-narrative.js finally subscribes to 'checkpoint' (D21)
+
+**GREEN: 2611/2611 assertions across 17 suites (`verify_narrative` grew
+from 65 to 76 assertions, no new suite). `cinder-loop.html`, 446,017
+bytes.** D11's own architecture reserves two Bus-driven reaction pools
+off any real sim event worth narrating; D14 (v0.2.18) added exactly such
+an event, `'checkpoint'` (`Sim.prototype._onRoomClear()`, `70-sim.js`,
+`{roomIndex, healed, handedIn}`), and shipped with nothing subscribed to
+it — a declared consumer never wired up. D21 closes that gap, and
+nothing else: `Narrative.prototype.subscribe` (`82-narrative.js`) gains
+one sibling line to its existing `'telegraph'` subscription —
+`bus.on('checkpoint', function () { self._say('checkpoint',
+LINE_TTL_MS); });` — reusing the already-real `_say()`/`LINE_TTL_MS`
+verbatim. One new `DIALOGUE.narrator.checkpoint` line pool
+(`10-data.js`), sibling to the existing five narrator pools, in a
+calmer register than `bossEntry` and honoring D12's double-voice rule
+purely in content (one line echoes `death`'s own "tempered" directly).
+Zero new CFG, zero new Bus event (`'checkpoint'` was already
+whitelisted by D14), zero sim-file change — the cheapest system on the
+entire post-D13 roadmap, and it shipped exactly that cheap.
+
+**Named judgment, resolved with the user: one generic pool, not two
+tiered ones.** The original pitch offered a fork — a single pool, or a
+tiered `checkpoint`/`checkpointFinal` pair keyed on `roomIndex ===
+CFG.ROOM_COUNT - 1`. The tiered version would have required importing
+`CFG` into `82-narrative.js` for the first time ever — this file
+currently imports only `RNG`/`DIALOGUE`, matching its own header's own
+claim that chosen text has "zero effect on sim state." Decided in favor
+of the single pool specifically to keep that property genuinely true,
+not just asserted.
+
+**No dedicated adversarial-verification pass this release — named
+honestly, not silently skipped.** Unlike D14-D16, this change carries
+none of the surfaces that kept producing real bugs on a first pass (no
+hash coverage, no terrain math, no save-hook timing, no new integration
+bridge — this is a presenter-only Bus subscription with zero effect on
+sim state, by this file's own long-standing architectural constraint). A
+full multi-lens workflow was judged overkill for a change this size and
+this structurally risk-free; instead, two direct checks: a dedicated
+test proving the pool fires identically regardless of the
+`'checkpoint'` payload's `healed`/`handedIn` values (no branching, an
+explicit v1 scope limit), and a manual tone read confirming the five new
+lines sit distinctly from `bossEntry`/`death` and genuinely reread
+differently once the Kilnkeeper reveal has landed.
+
+**What was deliberately not done.** Reacting to `healed`/`handedIn` with
+distinct line variants (a real v2, not built now — doubles the
+content-authoring surface). Any `'cinderBanked'`/`'cinderLost'` reaction
+(blocked on the cinder economy itself not existing yet, D14's own
+still-open follow-up). The two-pool tiered version named above — real,
+legitimate future design space, not ruled out permanently.
+
+---
+
+## v0.2.20 — 2026-08-25 — The summon primitive: elite Caller, ctx.addEnemy bridge, 5 adversarially-found bugs fixed (D16)
+
+**GREEN: 2600/2600 assertions across 17 suites (one NEW suite this
+release — `verify_caller`, 86/86 assertions across 21 parts).
+`cinder-loop.html`, 444,677 bytes.** A fifth enemy attack primitive,
+`attack: 'summon'`, is real and reachable for the first time since D9
+locked the regular four-template roster. D9's own framing already
+priced this: "the engine knows four movement/attack primitives... a
+fifth archetype costs one new primitive" (`45-enemy.js`'s own header).
+D16 is that primitive, realized as exactly one elite template — the
+Caller (`src/56-caller.js`, a new file numbered right after
+`55-boss.js`) — kept OUT of `DATA.ENEMIES`/`ENEMY_IDS` the same way
+Kilnwarden is (`verify_enemy.js:32` still asserts
+`DATA.ENEMY_IDS.length === 4`).
+
+**D16 (`docs/superpowers/specs/2026-08-24-summon-primitive-design.md`,
+ranked #2 of the post-D13 roadmap, right behind D15), locked before a
+line of code existed.** `Sim.prototype.addEnemy` (`70-sim.js`) already
+existed, real and tested, producing a collision-safe, deterministic
+per-instance seed from position — the primitive landed nearly free on
+top of already-proven infrastructure, not new machinery.
+
+**The mechanism: one new telegraph case, one new post-commit state, one
+new ctx bridge.** `Enemy.prototype.doTelegraph`'s attack switch
+(`45-enemy.js:396`) gains a sibling to the existing `'shoot'` case:
+`case 'summon': this.callIn(ctx); this.enter('summon'); break;`.
+`Enemy.prototype.callIn` (`45-enemy.js:452`) is the real primitive —
+guarded by `this.summonsUsed >= m.summonMax` at entry, a safe no-op
+once the Caller's lifetime cap is spent rather than a crash or a
+re-summon past the cap. It calls `ctx.addEnemy(m.summonId, spawnX,
+spawnY)` once per `m.summonCount`, incrementing `this.summonsUsed` — a
+new field zeroed in `resetTransient()` (`45-enemy.js:147`) alongside
+every other per-life field, enforcing a LIFETIME cap across the whole
+encounter, not a per-cast budget. `ctx.addEnemy` (`70-sim.js:87`) is a
+two-line mirror of the existing `ctx.addShot`, delegating to
+`Sim.prototype.addEnemy` unchanged. `'summon'` gets its own real
+post-commit state, `Enemy.prototype.doSummon` (`45-enemy.js:502`) — a
+near-copy of `'shoot'`'s own `doShoot()` body — rather than skipping
+straight to `'recover'`: a deliberate correction over the original
+pitch, which proposed `this.enter('recover')` directly after the call
+fires. Every OTHER primitive in the game gives the player a real
+post-commit punish window; skipping it for `'summon'` would have made
+the Caller the only primitive in the game with zero vulnerability the
+instant it commits. Summoned adds are excluded from room-clear/kill-
+currency by the SAME existing `_levelRosterIds` mechanism (`70-sim.js`)
+that already excludes the boot-path practice Dummy — no new exclusion
+logic needed. Reachable for v1 only via a new debug key, `F11`
+(`95-app.js:533`, the next free slot after F2-F10) — real
+procedural-generation placement (`50-gen.js`/`RunLogic.placeEnemies`)
+stays explicitly out of scope, a larger follow-up that would touch
+D3a's own fairness-audit pipeline. Manually playtested this session in
+a real browser build: F11 spawns a real Caller, driven forward it
+reaches telegraph then summon and spawns a real Ashwalker.
+
+**A dedicated adversarial-verification pass (4 lenses, 17 raw findings,
+21 confirmed after consolidating duplicates) found and fixed five real
+production bugs:**
+
+1. **The spawn offset was terrain-blind.** The original design's own
+   claim — "no terrain-probing needed, gravity resolves it" — was false
+   when the offset spawn point landed inside solid terrain, e.g. a
+   room's own boundary walls, which span the full room height.
+   `moveY()` (`25-body.js:77`) only snaps a falling body out of the
+   TOPMOST solid row it overlaps; a deeply-embedded spawn re-triggers
+   that same snap every tick and climbs upward through solid rock
+   instead of falling, eventually clearing the top and free-falling
+   back down — reproduced end-to-end against the real classes (climbed
+   from y=586 to y=-24 over ~20 ticks in one repro). Fixed with a new
+   `ctx.rectSolid` bridge (`70-sim.js:95`, delegating to
+   `World.prototype.rectSolid`, `20-world.js:85`) that checks the REAL
+   summoned template's own footprint, not a guess, and falls back to
+   the Caller's own already-valid position when the offset spot is
+   embedded.
+2. **The per-index spawn spacing (`i * 12`) wasn't scaled by
+   `lockFacing`.** Dead in practice since the shipped template ships
+   `summonCount: 1`, but a real formula bug: for a Caller facing left,
+   successive spawns would have folded back toward, and eventually
+   past, the Caller instead of fanning further away. Fixed to scale
+   both the base offset and the fan-out term by `this.lockFacing`
+   symmetrically.
+3. **`summonsUsed` was excluded from `Sim.prototype.hash()`**, directly
+   contradicting its own `resetTransient()` comment's explicit claim of
+   parity with `activeMove`/`phase` (both of which ARE hashed) — two
+   sims differing only in that field would have hashed identically
+   forever, defeating the exact class of desync `hash()` exists to
+   catch. Fixed by adding it to the per-target hash tuple
+   (`70-sim.js:1326`).
+4. **`CFG.CALLER_SUMMON_OFFSET` was a permanently-dead fallback
+   expression.** The CFG key was never actually defined anywhere in
+   `00-core.js`, so the `|| 24` fallback always fired. Fixed by moving
+   the offset onto the Caller template itself as `summonOffset: 24` —
+   the same D7 "content is data" reasoning `summonId`/`summonCount`/
+   `summonMax` already follow, since this is elite-specific placement,
+   not an engine-wide tunable.
+5. **F11 had no guard against repeated/held-key spawning.** Unlike F2's
+   own guard on the identical shape (`sim.players.length < 2`) or
+   F7-F10's self-guarding `buyX()` purchases, a held F11 (real OS
+   key-repeat) could spawn an unbounded stream of full-hp Callers.
+   Fixed with a live-count cap — `sim.targets.filter(...).length < 3` —
+   mirroring F2's own guard pattern.
+
+**Also fixed (comment-accuracy, no behavior change):** `45-enemy.js`'s
+own file header still said "four primitives" and didn't name `'summon'`
+even though this diff added it in that very file — updated to five.
+`56-caller.js`'s own header, in an earlier draft, falsely claimed
+`45-enemy.js`'s header already named `'summon'` — corrected once the
+header fix above landed. `doRecover()`'s predecessor-state comment
+(`45-enemy.js:609`) omitted `'summon'` from its enumerated list of
+states that must have "fully resolved" before a transition is
+requested — added. The `summonId: 'ashwalker'` rationale ("shortest
+reach/telegraph of the four") was only half true against the real data
+in `10-data.js` — ashwalker genuinely has the shortest reach (26px, vs.
+emberrush's 130 / kilnspitter's 200 / wickmoth's 62) but NOT the
+shortest telegraph (wickmoth's 18 is lower than ashwalker's 20) —
+corrected in both the source comment and the design spec.
+
+**Roughly nine closed test-coverage gaps beyond the five bugs above,**
+all with regression tests in the new `tests/verify_caller.js` (mirrors
+`verify_boss.js`'s shape at smaller scale, 86 assertions across 21
+parts): two-player fairness for the Caller's own commit AND,
+independently, for a freshly-summoned add (named as risk #5 in the
+implementation plan, shipped unaddressed in the first pass — proving
+the add runs its own `acquire()`, not an inherited copy of the Caller's
+target, by moving the Caller's own target out of the add's much shorter
+sight range); the `callIn()` missing-ctx defensive guard branch;
+killing the Caller after it has already summoned leaves the summoned
+add alive and fully functional (the "no parent/child link" claim,
+previously asserted only in prose, now proven directly in the opposite
+kill order from the existing roster-exclusion coverage); the
+`summonCount > 1` loop body (both facing directions' spacing, and the
+mid-loop `summonMax` cap-break when the cap isn't a multiple of the
+count); the summoned Ashwalker proven to be a real, fully-functional
+enemy — it can acquire, telegraph, and actually land a hit through
+`Combat.resolveBox`, not just tid-match; `dangerous()` stays false
+during `'recover'` too, not just `'telegraph'`/`'summon'`; the
+hash-coverage regression for `summonsUsed` itself (doubles as bug 3's
+own regression test); and a near-ledge spawn-safety sanity check — the
+other half of "no terrain-probing needed," proving an open-air offset
+spawn falls and settles sanely with no NaN/stuck physics.
+
+**Verified against real sim ticks and a real browser (L8).**
+`bash tests/run_all.sh` → **GREEN 2600/2600 across 17 suites**.
+
+**What was deliberately not done here — named honestly, not silently
+dropped (spec §9, unchanged).** No real procedural-generation placement
+(`50-gen.js`/`RunLogic.placeEnemies`) — debug-key-only for v1. No
+re-summoning after a summoned add dies — `summonMax` is a lifetime cap
+on the Caller's own casts, not a "keep N alive" budget. No parent/child
+lifecycle link between the Caller and its summons — killing the Caller
+does not despawn what it already summoned. No spawn-in VFX/SFX for the
+summoned add appearing. The `'summon'` verb is not retrofitted onto any
+regular `DATA.ENEMIES` template. No second elite reusing this same
+primitive with different numbers — this spec covers exactly one
+template, the Caller.
+
+---
+
+## v0.2.19 — 2026-08-24 — Weapon equip & switch: player.weapon goes live, real input, 3 adversarially-found bugs fixed (D15)
+
+**GREEN: 2505/2505 assertions across 16 suites (no new suite this
+release — every gain landed inside existing files: verify_meta,
+verify_platform, and verify_render all grew).
+`cinder-loop.html`, 434,920 bytes.** `player.weapon` goes live for the
+first time since v0.2.8 — `Sim.prototype.switchWeapon` is the real,
+validated primitive and `Sim.prototype.cycleWeapon` is the real
+input-facing wrapper a permanent gamepad-button-4/`KeyI` binding drives
+from day one, consumed in the SIM layer, not the presenter. D9's four
+weapons and D2's entire per-weapon colour-scaling axis have been dead
+build-diversity from a player's own perspective for eleven releases —
+this is that gap, closed.
+
+**D15 (`docs/superpowers/specs/2026-08-24-weapon-equip-switch-design.md`,
+the #1-ranked pitch of the post-D13 roadmap), locked before a line of
+code existed.** The switch-lockout rule is a correctness requirement,
+not a feel choice: `Combat.step` re-reads `player.weapon` every tick an
+attack resolves, to compute `Combat.weaponScale(player)` fresh
+(`40-combat.js:335`) — switching mid-swing would silently reweight an
+in-flight move's damage using the NEW weapon's stat-colour pair, not the
+one the move actually belongs to, confirmed by reading the live source,
+not assumed. `Player.prototype.canSwitchWeapon` is a one-line
+`return !this.attack;` — gating on "no active attack" is both necessary
+and sufficient, since `player.weapon` is read nowhere else outside that
+one path. Proven across an entire chained combo, not just a single
+swing: `Combat.start` repopulates `player.attack` IN PLACE on a chain
+continuation, never passing through null, so refusal must hold — and now
+provably does — across the whole `slashA` → `slashB` span, not just
+`slashA`'s own duration.
+
+**Two Sim-level methods, the real primitive and its one v1 trigger.**
+`Sim.prototype.switchWeapon(playerIndex, weaponId)` validates
+`player.alive()`, `canSwitchWeapon()`, and (an adversarially-found
+addition, below) `DATA.WEAPON_IDS` membership, before consulting
+`MetaLogic.isUnlocked`; sets `player.weapon`; if `playerIndex === 0`,
+also writes `meta.lastWeapon`; emits `'weaponSwitch'`
+(`{playerId, weaponId}`); returns bool — the identical shape `buyMaxHp`
+already established. `Sim.prototype.cycleWeapon(playerIndex)` is a thin
+wrapper — the only trigger v1 ships — advancing to the next UNLOCKED id
+in `DATA.WEAPON_IDS` (already alphabetically sorted, L4-deterministic),
+wrapping around, terminating in at most `ids.length` steps including the
+real, reachable case where the current weapon is the only unlocked one
+(a safe no-op, never a crash or infinite loop — proven directly with
+`enforceLocks` toggled true via F5 and nothing handed in yet, not
+assumed safe).
+
+**A real, permanent, player-facing input from day one — unlike every
+meta purchase before it.** F5-F10 are debug-key stand-ins specifically
+because they are genuine currency *purchases* with no shop UI yet;
+switching an already-unlocked weapon is not a purchase, it is a live
+gameplay action, so it gets a real input immediately: gamepad button 4
+(LB, confirmed genuinely unused anywhere in this codebase by grep) and
+keyboard `KeyI` (a free key next to the J/K/L/U cluster, confirmed
+unclaimed). `05-input.js` gained `'switchWeapon'` in both `Pad.BUTTONS`
+and `WINDOW` — copying `parry`'s exact two-table shape avoids the file's
+own named silent trap (a `BUTTONS`-only addition leaves `WINDOW[name]`
+`undefined` forever, `buffered()` always reading false, no error
+anywhere). The consume-and-act itself lives in the SIM layer, not the
+presenter — a new phase 0 in `Sim.prototype.step`, immediately before the
+existing "1. Attack input" phase, so identity resolves before action and
+a same-tick switch-then-attack combo correctly swings with the
+newly-equipped weapon, zero added latency. `92-menu.js` needed zero
+changes — confirmed, not assumed, that the Options screen's rebind row
+list is already fully generic over `Pad.BUTTONS.length`, the same
+"adding a button is a same-step, two-file change" precedent D13's own
+Parry addition already established.
+
+**`meta.lastWeapon` is captured on switch, a genuine simplification over
+the original pitch.** Found by reading the actual reset-timing source
+rather than assuming the pitch's proposed run-end-capture shape was
+correct: if player 0 is the one who died, their own natural respawn
+(`deadFrames` reaching 0) already fires `resetTransient()` — wiping
+`player.weapon` back to `'blade'` — BEFORE `_commitPendingLevel()`'s own
+reset loop (`70-sim.js:902-907`) ever runs. A run-end capture would have
+needed a second hook at the moment of death, mirroring `blueprintLost`'s
+own timing dance — real, avoidable complexity. Instead, `meta.lastWeapon`
+updates immediately, inside `switchWeapon()` itself, the instant player 0
+explicitly switches — no death-timing edge case exists at all.
+`Sim.prototype._applyMetaToPlayer` gained one line: reset to
+`resetTransient()`'s safe `'blade'` baseline, then layer the permanent
+choice back on, the exact two-step every other field in that method
+already uses. Only player 0's switches update the shared value — co-op
+partners each freely cycle their own live `player.weapon` independently
+in any given run, unaffected; a named judgment, not an oversight,
+trivially overridable at the cost of one button press.
+
+**A dedicated adversarial-verification pass (4 lenses, 20 raw findings,
+18 confirmed) found and fixed three real production bugs:**
+
+1. **`meta.lastWeapon` had no matching save hook.** It is a real,
+   frequently-mutated, player-facing preference — unlike F5-F10's
+   debug-only fields, it can change many times in an ordinary session
+   with no run-end anywhere nearby — the exact "mutated in memory but
+   silently reverted by an ordinary reload" gap `95-app.js`'s own F5/F6
+   comment already documents and was fixed for once. Fixed the same way:
+   a `weaponSwitch` → `saveMeta` listener wired in `95-app.js`, gated to
+   player 0's own switch. Proven through the real `KeyI` key-dispatch
+   path with a real reload in `verify_render.js` — a genuine
+   browser-level regression, not just a unit test against the underlying
+   Sim method.
+2. **`switchWeapon` never validated `weaponId` against
+   `DATA.WEAPON_IDS`, silently accepting garbage.** `MetaLogic.
+   isUnlocked()` returns true unconditionally for ANY argument under
+   Stage 1's own shipped default (`enforceLocks` false) — every pre-D15
+   caller only ever passed an id already known to be real, so that
+   contract was always safe until `weaponId` became the first untrusted
+   argument to reach it. Fixed with a real membership check, mirroring
+   `MetaLogic.sanitize()`'s own `DATA.WEAPON_IDS` validation.
+3. **The new phase-0 consume loop force-ate a buffered press for a dead
+   player**, unlike every other action in the game — the ONLY one that
+   would have permanently destroyed a buffered press made during a
+   player's death animation instead of leaving it to decay or persist on
+   its own schedule, unlike attack (`Combat.begin`'s own `!player.alive()`
+   check, before its own `pad.buffered()` read) and jump/roll/parry
+   (`Player.prototype.update`'s own dead early-return, before every one
+   of its own `pad.consume()` calls). Fixed with the identical `alive()`
+   guard.
+
+**Roughly ten closed test-coverage gaps beyond the three bugs above,**
+proving claims that were true by inspection but previously unproven:
+chained-combo refusal across the whole `slashA`→`slashB` span (named
+above); `cycleWeapon`'s fallback when `player.weapon` is somehow
+out-of-band (the same fixture `verify_stats.js`'s own `Combat.
+weaponScale` fallback uses); an out-of-range or negative `playerIndex`
+refused by both `switchWeapon` and `cycleWeapon` (the first Sim mutators
+in this codebase to take a bare `playerIndex` at all); `switchWeapon`
+still succeeding mid-boss-fight, and the real `KeyI` input path too (no
+action in this codebase is phase-gated, but the claim was unconfirmed
+until driven); a buffered `switchWeapon` press surviving hitstop and
+firing exactly once when the freeze lifts, matching `verify_arch`'s own
+"hitstop does not eat input" contract every other button already holds
+to; `Settings.actionForCode('KeyI')` actually mapping to `'switchWeapon'`
+through the real production dispatch translation, not just the raw
+`DEFAULT_KEYS` config; `_applyMetaToPlayer`'s weapon line exercised
+through a genuine restart, a fallback-when-no-longer-unlocked case, and
+the natural per-death respawn path specifically (the exact edge case the
+capture-on-switch design was chosen to avoid needing a second hook for);
+`_applyMetaToPlayer`'s own two call sites (`addPlayer()`, `applyMeta()`)
+each independently proven to reflect a co-op joiner's or a
+freshly-loaded save's current `meta.lastWeapon`; and co-op independence
+under death and respawn interleaving — player 1 cycling freely while
+player 0 is dead and naturally respawns in the same window, proving the
+two are structurally disjoint by a combined test, not just by separate
+claims about each half.
+
+**Verified against real sim ticks and a real browser (L8).**
+`bash tests/run_all.sh` → **GREEN 2505/2505 across 16 suites**.
+
+**What was deliberately not done here — named honestly, not silently
+dropped.** No HUD indicator of the currently-equipped weapon
+(`80-view.js`) — a real, separate presenter gap. No touch-input wiring
+for `switchWeapon` (L13 defers this: desktop + gamepad first). No
+per-player independent "last weapon" memory — `meta.lastWeapon` is
+single and shared, sourced from player 0 only, a named judgment from the
+spec. No currency cost anywhere in this feature — both starting-loadout
+selection and in-run switching are free, per the approved design,
+deliberately not folded into D8's purchase model.
+
+---
+
+## v0.2.18 — 2026-08-23 — Room/checkpoint/cinders structure: chained combat rooms, checkpoint healing, alcove-reachability bug fixed (D14)
+
+**GREEN: 2365/2365 assertions across 16 suites (no new suite this
+release — every gain landed inside existing files: verify_gen,
+verify_run, and verify_meta all grew).
+`cinder-loop.html`, 427,064 bytes.** A level is now a chain of
+`CFG.ROOM_COUNT` (3) procedurally-generated combat rooms plus the
+existing boss room, each entered through a new
+`Sim.prototype._enterRoom(i)` modeled directly on `_enterLevel()`/
+`_enterBoss()`. A checkpoint fires the instant a room's roster clears —
+independent of reaching the room's own exit — and really heals and hands
+in carried blueprints on the spot. A critical bug that could make an
+audited-fair room's own exit physically unreachable was found and fixed
+in two rounds, verified across 150 seeds.
+
+**Locked from a real design spec, not built freehand**
+(`docs/superpowers/specs/2026-08-23-room-checkpoint-structure-design.md`).
+The one governing constraint the whole feature answers to, named in the
+spec's own §2: death still ends the whole run exactly as D1 defines it.
+Rooms and checkpoints exist for pacing and structure *within* one run,
+not as a death-recovery mechanic — a Castlevania/Hollow Knight
+bonfire-resume model was considered and explicitly rejected in favor of
+keeping D1's own permadeath identity untouched.
+
+**A level is now a linear chain, reusing what already existed rather
+than inventing new machinery.** `Sim.prototype._enterLevel()`/
+`_enterBoss()` already tore down one `World` + enemy roster and loaded a
+fresh one mid-run — room-to-room transitions reuse that exact shape. The
+new `_enterRoom(roomIndex, gen)` replaces `_enterLevel()` entirely,
+called once per room before `_enterBoss()` takes over for the fourth.
+Each room is one `Gen.generate()` call bounded to `CFG.ROOM_BEATS` (6,
+versus a level's 14) and `CFG.ROOM_PICKUPS` (2, versus 4) —
+independently fairness-audited by the *same* D3a machinery, proven at
+these real smaller dimensions by a dedicated 50-seed coverage block.
+Per-room seeds come from a new `RunLogic.deriveRoomSeed`, its own salt
+distinct from `deriveEnemySeed`'s and `deriveBossSeed`'s so a level's
+three rooms, its enemy-placement stream, and its boss never collide.
+
+**The checkpoint: two of its spec's four jobs are real, two are
+reserved.** `Sim.prototype._onRoomClear()` fires the instant a room's
+roster clears (guarded to once per room, and against a room clearing on
+the exact tick a player dies), deliberately independent of reaching the
+exit — that separation is load-bearing: it gives the player a real,
+player-paced window to act before the door unlocks.
+`_healAtCheckpoint()` heals every alive player for half their own
+MISSING hp, ceil'd — full health heals nothing, a dead partner is
+skipped, not phantom-healed. `_handInCarriedBlueprints()` is D4's
+existing hand-in logic, extracted so the SAME implementation now fires
+at every checkpoint as well as true run-end — up to three hand-in
+opportunities per level instead of one, a genuine economy shift named
+here rather than buried. Not built yet, named honestly: the
+save-and-quit resume point (spec §7b) and the checkpoint's own narrative
+beat and SFX cue (spec §7c's other half). The `'checkpoint'` Bus event
+this release adds carries everything a future listener would need
+(`roomIndex`, `healed`, `handedIn`) — the chokepoint exists, nothing
+subscribes to it yet.
+
+**Cinders: the tube's own geometry is real and reachability-audited; the
+economy it exists to serve is reserved, not wired.**
+`Sim.prototype._buildCheckpointAlcove(gen)` stamps a wide flat SOLID run
+onto a room's own generated exit platform, wide enough for the exit and
+the tube to coexist without their interaction radii overlapping, and
+returns the tube's own `[x,y]` anchor — a real, deliberate divergence
+from the spec's own §5, named for the record: §5 described hand-authored
+checkpoint-room layouts; what shipped folds the checkpoint onto each
+combat room's own generated exit platform instead, never introducing a
+fifth room type. The tube's own physical placement is real and hashed;
+`CFG.CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` and the
+`cinderDrop`/`cinderLost`/`cinderBanked` Bus events are reserved — but
+the drop/carry/bank mechanic itself has no implementation: no
+`player.carriedCinders` field, no drop-on-kill roll, no bank-at-tube
+interaction.
+
+**A critical bug found — and found again, adversarially, against the
+first fix.** An earlier version of `_buildCheckpointAlcove()` stamped
+every column in its widened range SOLID unconditionally, including
+columns belonging to some OTHER platform at a different row — turning
+that platform's own column into a ceiling directly above it, silently
+blocking a path the D3a fairness audit had already proven legal in
+roughly a third of rooms fuzzed. Fixed once by stopping the stamp at
+another platform's own column — then, adversarially re-testing that
+exact fix, a second failure mode was found: protecting only a platform's
+own literal column was not enough, because a rising jump drifts sideways
+WHILE still climbing (this game's horizontal and vertical motion are
+fully independent) — a real double-jump climb clipped a stamped ceiling
+four real tiles beyond the takeoff platform's own edge. Fixed with a new
+`CFG.CLIMB_CLEARANCE_TILES` (8) buffer. Verified with a dedicated
+150-seed regression, reusing the same real, multi-strategy physics
+prover `verify_gen.js`'s own "strongest claim in the file" already
+trusts (promoted into shared `tests/harness.js` so this test could reuse
+it rather than fork an independently-tuned copy) to compare reachability
+WITH and WITHOUT the alcove stamped, against a real pre-alcove baseline:
+zero rooms newly blocked by the alcove across the sample.
+
+**Further fixes and closed test-coverage gaps, all with regression
+tests.** `loadFallback()` used to leave a stale `this.tube` from a
+world that no longer exists surviving into the emergency-recovery room;
+fixed with an explicit null, mirroring `_enterBoss()`'s own. `hash()`
+was missing `run.roomIndex` and tube-position coverage; both now hashed
+directly. Six stale `_enterLevel()`/"level" comments corrected to
+`_enterRoom()`/"room". `verify_meta.js`'s own keep-first checkpoint
+listener changed to a counting idiom so it can catch a double-fire
+regression. Eight named test-coverage gaps closed: the heal math, a
+full-health checkpoint healing nothing, the once-per-room guard, co-op
+multi-partner healing (the event's own `healed` total is the SUM across
+every partner's real share), a still-dead partner never healed nor
+relocated, a room clearing on the exact tick a player dies never firing
+a checkpoint, the `ROOM_COUNT` boundary walked room-by-room rather than
+convenience-jumped, and the tube's own placement geometry (a static
+clearance proof plus a 30-seed sample proving the ideal placement is
+real reachable code, not dead weight).
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2365/2365 across 16 suites**. The refactor that promoted
+`attemptHop()`/`attemptHopWith()` out of `verify_gen.js` into shared
+`tests/harness.js` infrastructure (alongside newly-shared `realKill()`/
+`clearRoomAndAdvance()`) is itself a real de-duplication — the exact
+"one sibling patched, others missed" risk this project has already been
+burned by once, closed before a second, independently-tuned copy of
+either could exist.
+
+**What was deliberately not done here.** The cinders economy itself —
+drop, carry, and bank — is scoped and reserved but has no
+implementation; a real, separate follow-up, not a gap discovered later.
+The checkpoint's own narrative beat and SFX cue (spec §7c). The
+save-and-quit resume point (spec §7b) — nothing about an in-progress
+run's room position survives a page reload yet. Branching rooms (spec
+§11, explicitly deferred in favor of a linear chain). A distinct
+hand-authored checkpoint room type (spec §5) — the checkpoint alcove is
+stamped onto an ordinary procedural combat room instead.
+
+---
+
 ## v0.2.17 — 2026-08-23 — Ember Dash and Parry: abilities, enhancements, full input/VFX/SFX wiring (D13)
 
 **GREEN: 2262/2262 assertions across 16 suites (no new suite this

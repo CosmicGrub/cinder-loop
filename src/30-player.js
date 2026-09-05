@@ -108,6 +108,11 @@ Player.prototype.resetTransient = function () {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -200,7 +205,10 @@ Player.prototype.resetTransient = function () {
   // Deliberately NOT cleared by teleport() (below) — a live level->boss
   // transition is not a death, and D4 says a blueprint survives all the way
   // to "a transition" (hand-in), not merely to the next room.
-  this.carriedBlueprint = null;
+  // D24: an array, up to a capacity 70-sim.js decides (never stored here —
+  // Player has no Meta access, the same one-way dependency this file has
+  // always kept). `.length` IS the fill level; no null-padding.
+  this.carriedBlueprints = [];
   // The box this character's poses were authored in. Combat mirrors and
   // feet-anchors against it, so entities of different sizes each get their own.
   this.poseW = CFG.PLAYER_W;
@@ -247,6 +255,11 @@ Player.prototype.teleport = function (x, y) {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -278,6 +291,15 @@ Player.prototype.invulnerable = function () {
   return this.iframes > 0 || this.state === 'roll' || this.state === 'dash';
 };
 Player.prototype.alive = function () { return this.state !== 'dead'; };
+// D15 (weapon equip & switch): Combat.step re-reads player.weapon every
+// tick an attack resolves (Combat.weaponScale, 40-combat.js:302-313) to
+// scale its damage — switching mid-swing would silently reweight an
+// in-flight move's damage using the NEW weapon's stat-colour pair, not
+// the one the move actually belongs to. Gating on "no active attack" is
+// necessary and sufficient: player.weapon is read nowhere else outside
+// that one path (design spec §1) — no additional check against roll/
+// dash/ledge state is needed.
+Player.prototype.canSwitchWeapon = function () { return !this.attack; };
 
 Player.prototype.update = function (pad, world, bus) {
   var b = this.body;
@@ -525,6 +547,12 @@ Player.prototype.update = function (pad, world, bus) {
       // frame is a free nineteenth frame and the distance overshoots.
       this.rollFrames = CFG.ROLL_FRAMES - 1;
       this.rollFrom = b.x;
+      // D17: arm the moveX wall-leniency (25-body.js) on the exact row
+      // this roll is departing from, while the body is still flush
+      // grounded — see that file's own comment for the mechanism. Cleared
+      // in endRoll(), below, so the exemption can never outlive this roll.
+      b.leaveRow = world.tileY(b.bottom());
+      b.wallLeniency = true;
       if (!this.crouching) { this.crouching = true; b.setHeight(CFG.PLAYER_CROUCH_H); }
       b.vx = this.facing * CFG.ROLL_SPEED;
       // Gravity on the start frame too. Without it vy is 0, moveY never runs,
@@ -723,6 +751,11 @@ Player.prototype.finish = function (world, bus, wasGrounded, axis) {
 Player.prototype.endRoll = function (world, bus) {
   var b = this.body;
   this.rollCd = CFG.ROLL_COOLDOWN_FRAMES;
+  // D17: disarm the wall-leniency the instant the roll that armed it ends
+  // — the exemption must never outlive its own roll (30-player.js's own
+  // roll-entry block is the only place this is ever set true).
+  b.wallLeniency = false;
+  b.leaveRow = -1;
   // Stand back up if there is room; a low ceiling keeps you crouched rather
   // than teleporting you into it.
   if (b.canStand(world, CFG.PLAYER_H)) {

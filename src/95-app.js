@@ -165,7 +165,12 @@ function saveMeta(meta) {
  * Standard gamepad mapping. Face button 0 jumps, 1 and 5 roll (B and RB, so
  * both thumb and shoulder work), 2 attacks, 3 parries (abilities spec §2b —
  * the next free face button, same grouping as the other three core actions),
- * dpad 12-15 and the left stick both steer.
+ * dpad 12-15 and the left stick both steer. Button 4 (LB) switches weapons
+ * (D15) — confirmed genuinely unused by anything else in this codebase
+ * before this. Only ever translates hardware into pad.set() calls, the
+ * exact same shape every other action here already uses — the actual
+ * consume-and-act decision lives in the SIM layer (Sim.prototype.step's
+ * own phase 0), never here, so a scripted test never needs a fake gamepad.
  * ======================================================================== */
 function pollGamepad(pad, gp) {
   if (!gp) return;
@@ -179,6 +184,7 @@ function pollGamepad(pad, gp) {
   pad.set('roll', !!((gp.buttons[1] && gp.buttons[1].pressed) || (gp.buttons[5] && gp.buttons[5].pressed)));
   pad.set('attack', !!(gp.buttons[2] && gp.buttons[2].pressed));
   pad.set('parry', !!(gp.buttons[3] && gp.buttons[3].pressed));
+  pad.set('switchWeapon', !!(gp.buttons[4] && gp.buttons[4].pressed));
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -244,6 +250,18 @@ function boot(canvas, hud, seed) {
   // a timer or every frame — _commitPendingLevel() only fires at a real
   // D4 "transition."
   sim.bus.on('runEnd', function () { saveMeta(sim.meta); });
+  // D15 (weapon equip & switch): meta.lastWeapon is a real, frequently-
+  // mutated, player-facing preference (Sim.prototype.switchWeapon writes
+  // it the instant player 0 switches) — unlike F5-F10's debug-only fields,
+  // it can be changed many times in an ordinary session with no run-end
+  // anywhere nearby. Without a dedicated save hook, this is the exact
+  // "mutated in memory but silently reverted by an ordinary reload" gap
+  // this file's own F5/F6 comment above already documents and fixed once
+  // for those two fields — adversarially found again here, fixed the same
+  // way: save immediately, gated to player 0's own switch (the only one
+  // that actually touches shared meta; a co-op partner's own live
+  // player.weapon is per-player and never persisted).
+  sim.bus.on('weaponSwitch', function (e) { if (e.playerId === sim.players[0].id) saveMeta(sim.meta); });
 
   // A silent practice dummy near spawn, before anything that fights back —
   // boot-path flavor, not part of 60-run.js's own roster (a Dummy is a
@@ -258,7 +276,7 @@ function boot(canvas, hud, seed) {
   // forever — a real bug an earlier draft of this exact change had, caught
   // by driving it end to end in a real browser rather than assumed safe.
   // NOT actually permanent, though, an earlier version of this comment's
-  // own overclaim, caught adversarially: both _enterLevel() and
+  // own overclaim, caught adversarially: both _enterRoom() and
   // _enterBoss() unconditionally clear this.targets on every transition,
   // this dummy included, and nothing ever re-adds it — it survives only
   // until the player walks through the very first exit. Left as-is rather
@@ -500,6 +518,23 @@ function boot(canvas, hud, seed) {
     if (e.code === 'F8') { if (sim.buyDashExtIframes()) saveMeta(sim.meta); }
     if (e.code === 'F9') { if (sim.buyParryRiposte()) saveMeta(sim.meta); }
     if (e.code === 'F10') { if (sim.buyParryReflect()) saveMeta(sim.meta); }
+    if (e.code === 'F12') { if (sim.buyBackpackSlot()) saveMeta(sim.meta); }   // D24
+    // D16 (summon-primitive spec §6): debug-only Caller spawn, a fixed
+    // distance in front of player 0 — the same direct sim.addEnemy() call
+    // the boot-path Dummy already makes via sim.addTarget() above,
+    // bypassing ctx entirely. Real procedural placement (50-gen.js) stays
+    // explicitly out of scope for v1 (spec §6/§9).
+    //
+    // Adversarially found: unlike F2's own guard on this exact repeat-key
+    // shape (sim.players.length < 2) or F7-F10's self-guarding buyX()
+    // calls, a held F11 (real OS key-repeat) had nothing stopping it from
+    // spawning an unbounded stream of full-hp Callers. Capped the same way
+    // F2 caps co-op join — a small live count, not a session total, so the
+    // key stays usable for testing more than one at a time.
+    if (e.code === 'F11' && sim.targets.filter(function (t) { return t.tid === 'caller' && t.alive(); }).length < 3) {
+      var pb = sim.players[0].body;
+      sim.addEnemy(C.Caller.template, pb.x + 80, pb.y);
+    }
   });
   window.addEventListener('keyup', function (e) {
     if (app.paused) return;
@@ -681,6 +716,8 @@ function boot(canvas, hud, seed) {
     if (gp.buttons[13] && gp.buttons[13].pressed) pad.set('down', true);
     // Same face button 3 pollGamepad's own co-op mapping uses for parry.
     if (gp.buttons[3] && gp.buttons[3].pressed) pad.set('parry', true);
+    // Same button 4 pollGamepad's own co-op mapping uses for switchWeapon (D15).
+    if (gp.buttons[4] && gp.buttons[4].pressed) pad.set('switchWeapon', true);
   }
 
   // Takes the View, not the raw canvas: it needs cssW, the LOGICAL width, to

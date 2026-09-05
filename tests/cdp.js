@@ -240,6 +240,7 @@ const KEYS = {
   KeyD: { key: 'd', code: 'KeyD', vk: 68 },
   KeyS: { key: 's', code: 'KeyS', vk: 83 },
   KeyW: { key: 'w', code: 'KeyW', vk: 87 },
+  KeyI: { key: 'i', code: 'KeyI', vk: 73 },   // D15: switchWeapon's default binding
   KeyJ: { key: 'j', code: 'KeyJ', vk: 74 },
   KeyP: { key: 'p', code: 'KeyP', vk: 80 },
   Space: { key: ' ', code: 'Space', vk: 32 },

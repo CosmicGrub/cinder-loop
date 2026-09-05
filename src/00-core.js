@@ -266,6 +266,10 @@ var CFG = {
   GEN_DBLJUMP_HIGH_MIN_GAP_TILES: 2,
   GEN_MAX_RISE_TILES: 5,     // no generated beat may ever ask for more rise than this
   GEN_ROLL_HAZARD_TILES: 4,  // ground-level hazard strip crossable via roll: measured 85.5px = 5.34 tiles
+  // D17: per-beat roll to place a hazard beat instead of a normal one,
+  // capped at one per generated candidate (50-gen.js) — see that file's
+  // own hazardEdgeAllowed/placeHazardBeat for the mechanism.
+  GEN_HAZARD_BEAT_CHANCE: 0.15,
 
   GEN_MIN_FIGHT_TILES: 4,    // design judgment, not a measurement — see above
 
@@ -360,6 +364,13 @@ var CFG = {
   META_DASH_EXT_IFRAMES_COST: 15,
   META_PARRY_RIPOSTE_COST: 20,
   META_PARRY_REFLECT_COST: 25,
+  // D24: the "backpack slot" purchase META_BLUEPRINT_CAPACITY's own
+  // comment named as deferred — raises capacity 1 -> 2. Priced at the
+  // cheap end of this range on purpose: a narrower, situational QoL
+  // purchase (only matters while already carrying one un-handed-in
+  // blueprint AND a second, different, still-locked one drops before the
+  // next checkpoint), not a combat-power purchase like its siblings above.
+  META_BACKPACK_SLOT_COST: 15,
   // Frames of bonus this.iframes granted on a dash's OWN end (endDash(),
   // 30-player.js) when Dash Extended I-Frames is owned — the dash's own
   // i-frames already cover its full committed duration (state === 'dash'),
@@ -370,7 +381,68 @@ var CFG = {
   DASH_EXT_IFRAMES_BONUS: 10,
   // A flat bonus hit, not scaled by Combat.weaponScale like an ordinary
   // swing — Riposte is a reward for the READ, not a second weapon attack.
-  PARRY_RIPOSTE_DAMAGE: 4
+  PARRY_RIPOSTE_DAMAGE: 4,
+
+  /* --- rooms, checkpoints, cinders (60-run.js/70-sim.js/91-progress.js,
+   * room-checkpoint-structure spec, D1-adjacent — the run loop itself is
+   * untouched, see the spec's own §2) -------------------------------------
+   * ROOM_COUNT is the one number everything else in this block answers to
+   * — three combat rooms per level, then the boss, per the spec's own §3.
+   * ROOM_BEATS/ROOM_PICKUPS are smaller-than-a-level opts fed straight into
+   * the EXISTING Gen.generate(seed, opts) — not a new width/height
+   * parameter, since none exists (a level's own size is a DERIVED output
+   * of its platform layout, never a direct input). Named design judgments,
+   * the same discipline GEN_MIN_FIGHT_TILES/META_MAXHP_COST already use —
+   * "how big should a single combat room feel" has no capture plate any
+   * more than "how much room feels fair to fight on" does. */
+  ROOM_COUNT: 3,
+  ROOM_BEATS: 6,       // well under LEVEL's own default of 14 — one focused fight, not a full traversal
+  ROOM_PICKUPS: 2,     // under the level default of 4 — three rooms' worth should roughly match one level's take
+  // The checkpoint alcove stamped onto a room's own exit platform (see
+  // _buildCheckpointAlcove(), 70-sim.js) needs real room for TWO distinct
+  // points that must NOT share an interaction radius: the exit itself
+  // (RUN_EXIT_RADIUS, above) and the tube (TUBE_OFFSET_X/TUBE_INTERACT_
+  // RADIUS, below) — reusing GEN_MIN_FIGHT_TILES verbatim here (4 tiles,
+  // 64px) was tried first and does not actually fit both zones with any
+  // clearance once the numbers are worked out on paper, so this gets its
+  // own, wider constant rather than silently overloading a number picked
+  // for an unrelated purpose (a fair FIGHTING platform, not a two-point
+  // checkpoint fixture).
+  // Up to 11 tiles / 176px (half=floor(10/2)=5 each direction, inclusive of
+  // the exit's own column) — narrower wherever a neighboring platform's own
+  // column stops the stamp early; see _buildCheckpointAlcove()'s own header
+  // (70-sim.js) for why it stops rather than skipping past one.
+  CHECKPOINT_ALCOVE_TILES: 10,
+  // Adversarially found (real, reproduced with actual Sim physics): a
+  // rising jump drifts sideways WHILE still climbing — this game's own
+  // horizontal/vertical motion are fully independent — so protecting only
+  // a lower platform's own literal column (the first version of this fix)
+  // was not enough; a real double-jump climb clipped a stamped ceiling
+  // four real tiles beyond the takeoff platform's own edge. A generous,
+  // named design judgment, not a measurement — no capture plate exists for
+  // "how far can a climb drift before reaching height" any more than one
+  // exists for GEN_MIN_FIGHT_TILES's own "how much room feels fair" — set
+  // comfortably above the worst drift reproduced during this session's own
+  // fuzzing, not tuned to the single case that first surfaced it.
+  CLIMB_CLEARANCE_TILES: 8,
+  // Offset far enough past RUN_EXIT_RADIUS (24px) that standing at the
+  // tube never simultaneously satisfies the exit's own advance check —
+  // walking up to bank cinders must never accidentally leave the room.
+  // 44 - 16 = 28, clearing RUN_EXIT_RADIUS's own 24px edge with margin.
+  TUBE_OFFSET_X: 44,
+  TUBE_INTERACT_RADIUS: 16,
+  // A fraction of MISSING hp, not of max hp — a checkpoint reached at full
+  // health heals nothing (there is nothing to heal), matching how a real
+  // "top you back up" beat should read rather than a flat, sometimes-
+  // wasted number.
+  CHECKPOINT_HEAL_FRAC: 0.5,
+  // Cinders are a second, riskier income stream into the SAME meta.currency
+  // pool RUN_CURRENCY_PER_KILL already pays into (spec §8/§9) — priced
+  // above the flat per-kill rate specifically so banking a real handful
+  // of them reads as worth the walk and the risk, not a rounding error
+  // next to ordinary kill income.
+  CINDER_DROP_CHANCE: 0.25,
+  CINDER_CONVERSION_RATE: 2
 };
 
 /* ------------------------------------------------------------------ math */
@@ -438,7 +510,25 @@ var EVENTS = [
   // localStorage) rather than a redundant re-derivation of something
   // already inferable, the same bar 60-run.js's own "zero new Bus events"
   // held itself to.
-  'blueprintDrop', 'blueprintLost', 'blueprintUnlocked', 'runEnd'
+  'blueprintDrop', 'blueprintLost', 'blueprintUnlocked', 'runEnd',
+  // room-checkpoint-structure spec: 'checkpoint' fires once per room clear
+  // (independent of reaching the exit — see 70-sim.js's own _onRoomClear()
+  // comment for why that separation is load-bearing, not incidental), the
+  // one shared chokepoint 91-progress.js/82-narrative.js/85-audio.js all
+  // hang off, mirroring runEnd's own "one event, several real consumers"
+  // shape rather than inventing a separate signal per consumer. The three
+  // cinder events are each a real, distinct moment (a kill can drop one, a
+  // death can lose several at once, a tube visit can bank several at
+  // once) — kept separate rather than folded into one payload-varying
+  // event, the same "one event per real fact" discipline blueprintDrop/
+  // blueprintLost/blueprintUnlocked already established for the other
+  // carried resource.
+  'checkpoint', 'cinderDrop', 'cinderLost', 'cinderBanked',
+  // D15 (weapon equip & switch): fires from Sim.prototype.switchWeapon the
+  // instant a switch succeeds. Payload names the weapon explicitly
+  // (weaponId, not blueprintUnlocked's own easier-to-misread `id`) — a
+  // deliberate small clarity improvement, not an oversight.
+  'weaponSwitch'
 ];
 
 function Bus() {

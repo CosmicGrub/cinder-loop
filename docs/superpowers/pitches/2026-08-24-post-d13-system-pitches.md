@@ -1,0 +1,222 @@
+# Post-D13 System Pitches — Roadmap (PROPOSED, not yet approved)
+
+> **Status:** This is a pitch deck, not an approved spec. Nothing here is a
+> locked design decision until it goes through this project's own
+> brainstorming → spec → plan flow the way D13 (abilities) and the room-
+> checkpoint-structure work did. D-numbers below (D15–D24) are the
+> synthesis's own proposed numbering, assuming the in-flight room/checkpoint/
+> cinders work lands and gets documented as **D14** first.
+>
+> Produced by a 7-agent workflow: one grounding pass over the real `src/`
+> and both open specs, five parallel domain passes (combat/build-diversity,
+> generation/level-variety, meta-progression/economy, narrative/world-
+> building, enemy/boss-content) each reading live source and citing file:line
+> for every claim, and one synthesis pass reading all five against each
+> other — dropping duplicates, naming conflicts/synergies, and ranking
+> survivors against D1's own test (does it deepen spawn→clear→boss→die→
+> spend→respawn itself, not just sit near it).
+
+---
+
+## Ground truth this whole deck rests on
+
+The room-checkpoint-structure spec (2026-08-23) is **mid-implementation**,
+not a future proposal — `_enterRoom`/`_buildCheckpointAlcove`/
+`_onRoomClear`/`_healAtCheckpoint` are real and firing in `70-sim.js` today,
+and `CFG.ROOM_COUNT`/`CHECKPOINT_ALCOVE_TILES`/`TUBE_INTERACT_RADIUS`/
+`CHECKPOINT_HEAL_FRAC`/`CINDER_DROP_CHANCE`/`CINDER_CONVERSION_RATE` are all
+real CFG constants — but it hasn't been written up as a masterfile
+D-decision or changelog entry yet. This deck assumes it lands as **D14**
+once documented, and drops one pitch (a "wire the cinder economy" system)
+as a duplicate of that unfinished work rather than ranking it as new.
+
+## Cut as duplicate
+
+**"Wire the cinder economy end-to-end"** — not a new system. Every field
+it proposes (`carriedCinders`, `_bankCinders()`, `cinder*` Bus events) is
+already named/reserved by the in-flight D14 spec; the pitch's own cited
+evidence is a comment *inside* that spec's own code (`70-sim.js:670`, "the
+tube... the cinder-bank trigger, still to come"). Ships as part of
+finishing D14, not as a competing decision.
+
+## Real conflict, parked deliberately
+
+**"Cindermaw" — a second boss.** Buildable/testable standalone exactly as
+Kilnwarden was, but D12 fires the villain reveal keyed only to
+`sim.run.phase === 'boss'`, calling it "the final boss fight" — a second
+boss makes that ambiguous, and `_enterBoss()` has no boss-selection concept
+at all. Needs a companion run-structure decision made jointly with whoever
+owns D12. Not ranked; stays parked until that decision is made on purpose.
+
+## Real synergies worth sequencing around
+
+- **Grafts (D20)** and **Dominance Breakpoints (D19)** both want the same
+  `dominantColour(stats)` extraction out of `Player.prototype.gainStat` —
+  build once, both benefit. They touch disjoint chokepoints otherwise.
+- **Grafts' `onHitDealt` multiplier** composes with **Guard's (D18)** break
+  threshold — a damage-boosting graft could push a normally-chip-only hit
+  across `GUARD_BREAK_DAMAGE`. Free, correct interaction once both land;
+  needs one confirming test, not an assumption.
+- **Weapon Equip (D15)**, **Grafts' socket cost (D20)**, **Flask charges
+  (D23)**, and **Backpack slot (D24)** all spend currency with **no
+  player-facing trigger** — every one currently punts to an F-key debug
+  stand-in, the same gap the shipped D13 enhancements already have. A
+  shop/hub UI is real, separately-owned infrastructure; named once here
+  rather than re-deferred in every section.
+- **D21/D22/D23** all touch files D14 is still actively shaping
+  (`_enterRoom`, `_onRoomClear`, the `'checkpoint'` payload shape) — flagged
+  to sequence *after* D14 locks, not before.
+
+---
+
+## Recommended build order
+
+| # | System | Extends | Size/Risk | Why here |
+|---|---|---|---|---|
+| **D15** | **Weapon equip & switch** — `player.weapon` goes live (gated on `!player.attack`); `meta.startWeapon` adds a free starting-loadout choice once unlocked | D9, D2, D4, D8 | Small — under 40 lines, every touch point mirrors an existing pattern | Closes the single largest already-built-but-inert surface in the game: D9's 4-weapon roster and D2's colour-scaling axis have been dead code from a player's view since v0.2.8 |
+| **D16** | **"Summon" primitive** — elite Caller template (kept out of `DATA.ENEMIES`, D9-style) calls in an existing template via `ctx.addEnemy` | D9 | Small — reuses fully-tested `Sim.prototype.addEnemy` | Adds a sustained/attrition axis the 4 single-threat primitives can't produce, for near-zero new risk |
+| **D17** | **Roll-crossable hazard beats** — new generation beat stamps an on-path `TILE.HAZARD` strip sized off `CFG.GEN_ROLL_HAZARD_TILES` | D3/D3a | Small — self-contained to `50-gen.js` | Spends a real, measured capability constant that has had **zero consumers** since it was written |
+| **D18** | **"Guard" primitive** — second `guardHp` pool gates break on the `amount` already passed into `Enemy.prototype.hurt`, no `resolveBox` signature change | D9 | Small — one function touched | A "change your attack, not your position" lever; real feel-risk only playtesting resolves |
+| **D19** | **Dominance Breakpoints** — one passive per D2 colour (Ember→Dash cooldown, Umbral→Parry window, Verdant→Roll cooldown) past a dominance threshold | D2 × D13 | Small — 3 CFG constants + 3 field-write-site edits | Connects two shipped-but-never-linked systems; makes colour choice qualitative, not just a bigger number |
+| **D20** | **Grafts** — closed 3-hook-type passive-modifier system (`onHitDealt`/`onHitTaken`/`onKill`), per-run carry, dropped from kills only | D7 | Medium — touches `resolveBox` (×2), `resolveSlam`, kill-hook | Gives D7's own named-but-undefined third content table ("weapons **and grafts**") an actual mechanic — the least-defined real noun in the project |
+| **D21** | **Checkpoint narration** — `82-narrative.js` finally subscribes to the already-emitted `'checkpoint'` event | D11 | Cheapest system in the deck — no new CFG/Bus, two line pools | Finishes a declared D11 consumer that was never wired up |
+| **D22** | **Traversal Room archetype** — one `ROOM_COUNT` slot (fixed at index 1 for v1) may skip enemy placement, require only `reachedExit` | D14 | Medium — touches `isLevelClear` semantics + per-room-kind plumbing | Genuine room-*type* variety inside the existing linear chain, without reopening the deferred branching question |
+| **D23** | **Flask charges** — flat-integer heal, zero base charges, purchased via the existing cost tier | D8, D2 | Medium — real open question is refill timing (recommend `_onRoomClear()`) | First player-triggered heal in the game — a real risk/resource lever inside the core loop |
+| **D24** | **Backpack slot** — `carriedBlueprint` (scalar) → `carriedBlueprints` (capacity-bounded array) | D8 | Small, low urgency | Makes the already-dead `CFG.META_BLUEPRINT_CAPACITY: 1` constant real; correctly scoped to blueprints only |
+
+**Sequencing:** Start D15–D18 now, in parallel with D14 finishing — none
+touch a file D14 is actively changing, all four are low-risk completions of
+already-built-but-inert infrastructure. D19 follows right behind (shares
+the `dominantColour()` extraction with D20). Let D14 land and get its own
+masterfile number before starting D21–D23. Build D20 after D19 (shared
+refactor, bigger/more novel — low-risk-before-novel). D24 can go anywhere
+after D15 — no dependencies, but also the thinnest standalone value until
+a second carriable resource (cinders) exists to arbitrate against.
+
+### Considered, ranked below the line
+
+- **Level-scoped generation presets** (`DATA.GEN_PRESETS` reweighting
+  `riseWeights`/`onewayChance`/`riskChance` per level) — real and
+  D7-idiomatic, but reweights an existing distribution rather than adding a
+  new mechanism, and every number is an unmeasured placeholder. Worth
+  building once D17 has its own tunable chance constant to fold in.
+- **Run-to-run narrative memory** (a persisted `src/83-memory.js`
+  remembering death/reveal history across reloads) — the deepest of the 15
+  source pitches, but explicitly presentation-only ("zero effect on sim
+  state"), so it fails the roadmap's own D1 test (deepen the loop itself).
+  Real depth, correctly lower priority.
+- **Lore Codex** (a fifth currency sink: purchasable world-building text) —
+  legitimate, but inherits rather than solves the shared shop-UI/`meta`-in-
+  `Menu` gap every currency-spend pitch above also punts on.
+
+---
+
+## Revised build order (2026-08-25) — tier / priority / risk
+
+D15 (weapon equip & switch) and D16 (the summon primitive) are now built,
+each through this project's own spec → plan → implement → adversarial-
+review → doc-sync discipline. That execution surfaced real signals the
+original synthesis could only guess at — this reorganizes everything from
+D17 on using three axes together, not the single linear list above:
+
+- **Tier** — how self-contained the change is and how much of it is
+  already proven-safe surface vs. genuinely new engine capability.
+- **Priority** — value within a tier (cheapest/highest-leverage first).
+- **Risk** — informed by what actually broke during D14–D16, not the
+  original pitches' own pre-implementation guesses.
+
+**The one standing risk category every tier below is read against:**
+every feature that has touched `70-sim.js`'s core (`step()`/`hash()`/the
+`ctx` bridge) or `45-enemy.js`'s state machine has produced a real,
+adversarially-found bug on its first pass — D14's alcove-reachability bug
+(found in TWO rounds, the second only by re-testing the first fix), D15's
+three production bugs (a missing save hook, a missing validation guard, a
+missing `alive()` guard). This is not a per-feature coincidence; treat
+touching either file as inherently Tier-2-or-higher regardless of how
+small the mechanic looks on paper, and budget a real adversarial pass for
+it, not a lighter one. Separately: any new **permanent** meta-mutation
+needs an explicit "is there a save hook for every path that touches it"
+check *during design*, not discovered adversarially after the fact — D15's
+bug #1 is now a checklist item, not a surprise, for D20/D23/D24 below,
+all three of which touch permanent `meta` state.
+
+### Tier 1 — build next: minimal footprint, low risk, no blocking dependency
+
+1. **D21 — Checkpoint narration.** The cheapest system left in the entire
+   roadmap: zero new CFG, zero new Bus event (the `'checkpoint'` event D14
+   already emits carries everything needed), zero sim-file changes — a
+   `bus.on('checkpoint', ...)` subscription and two `DIALOGUE` line pools
+   in already-presenter-only files. D14 is now stable, so the payload
+   shape this depends on isn't moving underneath it.
+2. **D17 — Roll-crossable hazard beats.** Self-contained to `50-gen.js`,
+   the smallest blast radius named by any of the 15 original pitches —
+   spends a real, already-measured capability constant
+   (`CFG.GEN_ROLL_HAZARD_TILES`) that has had zero consumers since it was
+   written.
+3. **D24 — Backpack slot.** Small and low-risk on its own terms, but
+   correctly LOW priority within this tier — its standalone value is thin
+   until a second carriable resource (cinders, below) exists to arbitrate
+   against. Natural filler, not something to reach for first.
+
+### Tier 2 — real design surface, a shared chokepoint, or genuinely new mechanism
+
+Ordered by ascending openness — how much of each still needs a real
+decision (or its own brainstorming pass) versus how much the spec can
+already write itself:
+
+1. **D19 — Dominance Breakpoints.** Small mechanical footprint (three
+   field-write sites in `30-player.js`), but that file is D13's own
+   hardened, adversarially-tested surface — touch it with the same care
+   D15/D16 needed for their own shared files. Shares the
+   `dominantColour()` extraction with D20, a reason to keep them adjacent
+   in sequence.
+2. **D18 — Guard primitive.** One function touched
+   (`Enemy.prototype.hurt`) — but that function is the single chokepoint
+   *every hit landing on any enemy in the game* already routes through.
+   Small mechanic, high-traffic surface; budget the review accordingly.
+3. **Finish D14's cinder economy.** Named honestly in D14's own doc-sync:
+   the room/checkpoint machinery and the tube's physical geometry shipped;
+   the drop/carry/bank mechanic itself did not. This is NOT a small
+   follow-up — the original room-checkpoint spec's own §4 called the
+   interact button "the single largest net-new mechanism in the feature"
+   (no existing interactable-tile precedent anywhere in the engine,
+   genuinely new `Pad`/settings/keybind work), comparable in real scope to
+   D15's own `switchWeapon` input work, not a quick add-on. Re-classified
+   up from an earlier, too-optimistic Tier-1 read for exactly this reason.
+4. **D22 — Traversal Room archetype.** Touches `isLevelClear` semantics
+   directly, and carries a real, still-open pacing question (a zero-enemy
+   room's checkpoint becomes a free extra cinder/blueprint hand-in) that
+   needs a playtest to answer, not just code.
+5. **D23 — Flask charges.** A genuinely undecided design fork — where
+   charges refill is not resolved by the existing pitch and needs its own
+   brainstorming pass before it can even be spec'd, not just built from
+   what's already written.
+6. **D20 — Grafts.** The largest net-new engine surface of the original
+   "core nine" — three chokepoints (`resolveBox` twice, `resolveSlam`, the
+   kill-hook), a new per-run resource lifecycle, and one real, named design
+   opinion (colour-gating a graft's bonus) the original pitch itself said
+   needs a second reader, not a unilateral build call. Sequence last in
+   this tier on purpose — lowest-risk-before-most-novel, applied literally.
+
+### Tier 3 — parked, or blocked on a companion decision
+
+Unchanged from the original synthesis, restated for completeness: a
+second boss ("Cindermaw") needs a companion D12 reveal-logic decision
+before it can be sequenced at all; level-scoped generation presets are
+softest of the surviving generation pitches (every number an unmeasured
+placeholder) and worth building once D17 has its own tunable to fold in;
+run-to-run narrative memory is real depth but presentation-only, failing
+the roadmap's own "does it deepen the mechanical loop" test; the Lore
+Codex inherits rather than solves the shared shop-UI/`Menu` wiring gap
+every currency-spend pitch in Tier 2 also punts on.
+
+---
+
+## Full pitch detail
+
+The complete grounding digest, all 15 individual pitches (5 domain decks ×
+3 each) with exact file:line implementation shapes, and the full synthesis
+reasoning are preserved in this session's workflow transcript
+(`wx1hnawlh`). Ask to expand any single system above into its full
+file-level implementation shape before it goes through this project's own
+brainstorming → spec → plan flow.
