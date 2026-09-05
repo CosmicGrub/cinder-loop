@@ -364,6 +364,13 @@ var CFG = {
   META_DASH_EXT_IFRAMES_COST: 15,
   META_PARRY_RIPOSTE_COST: 20,
   META_PARRY_REFLECT_COST: 25,
+  // D24: the "backpack slot" purchase META_BLUEPRINT_CAPACITY's own
+  // comment named as deferred — raises capacity 1 -> 2. Priced at the
+  // cheap end of this range on purpose: a narrower, situational QoL
+  // purchase (only matters while already carrying one un-handed-in
+  // blueprint AND a second, different, still-locked one drops before the
+  // next checkpoint), not a combat-power purchase like its siblings above.
+  META_BACKPACK_SLOT_COST: 15,
   // Frames of bonus this.iframes granted on a dash's OWN end (endDash(),
   // 30-player.js) when Dash Extended I-Frames is owned — the dash's own
   // i-frames already cover its full committed duration (state === 'dash'),

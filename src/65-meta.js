@@ -70,6 +70,10 @@ function Meta() {
   this.dashExtIframes = false;
   this.parryRiposte = false;
   this.parryReflect = false;
+  // D24: the backpack slot — a fifth flat-cost boolean of the exact same
+  // shape. Raises blueprint carry capacity 1 -> 2 (70-sim.js's own
+  // _blueprintCapacity reads it fresh at every drop, never snapshotted).
+  this.backpackSlot = false;
 }
 
 function isPlainObject(v) {
@@ -106,6 +110,7 @@ function sanitize(raw) {
   if (typeof raw.dashExtIframes === 'boolean') out.dashExtIframes = raw.dashExtIframes;
   if (typeof raw.parryRiposte === 'boolean') out.parryRiposte = raw.parryRiposte;
   if (typeof raw.parryReflect === 'boolean') out.parryReflect = raw.parryReflect;
+  if (typeof raw.backpackSlot === 'boolean') out.backpackSlot = raw.backpackSlot;
 
   if (isPlainObject(raw.unlocked)) {
     var ids = C.DATA.WEAPON_IDS, i;
@@ -206,6 +211,10 @@ function spendOnParryRiposte(currency) {
 function spendOnParryReflect(currency) {
   return C.RunLogic.spend(currency, CFG.META_PARRY_REFLECT_COST);
 }
+// D24: the backpack slot, same shape as the four above.
+function spendOnBackpackSlot(currency) {
+  return C.RunLogic.spend(currency, CFG.META_BACKPACK_SLOT_COST);
+}
 
 C.Meta = Meta;
 C.MetaLogic = {
@@ -220,7 +229,8 @@ C.MetaLogic = {
   spendOnDashExtraCharge: spendOnDashExtraCharge,
   spendOnDashExtIframes: spendOnDashExtIframes,
   spendOnParryRiposte: spendOnParryRiposte,
-  spendOnParryReflect: spendOnParryReflect
+  spendOnParryReflect: spendOnParryReflect,
+  spendOnBackpackSlot: spendOnBackpackSlot
 };
 
 })(CINDER);

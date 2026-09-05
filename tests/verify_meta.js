@@ -116,6 +116,14 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     MetaLogic.sanitize({ version: 1, unlocked: { blade: 1 } }).unlocked.blade, undefined);
   s.eq('one bad field does not discard an otherwise-good payload',
     MetaLogic.sanitize({ version: 1, currency: 40, enforceLocks: 'garbage' }).currency, 40);
+  // D24: the backpack slot round-trips like the four §4 flags, and a
+  // non-boolean falls back to the default rather than poisoning the load.
+  s.eq('backpackSlot survives sanitize',
+    MetaLogic.sanitize({ version: 1, backpackSlot: true }).backpackSlot, true);
+  s.eq('a non-boolean backpackSlot falls back to false',
+    MetaLogic.sanitize({ version: 1, backpackSlot: 'yes' }).backpackSlot, false);
+  s.eq('a fresh default does not own the backpack slot',
+    MetaLogic.defaults().backpackSlot, false);
 }
 
 /* ============================================================= round-trip */
@@ -796,7 +804,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     a.sim.meta.enforceLocks = true;
     for (const t of a.sim.targets) {
       a.realKill(t);
-      if (a.p().carriedBlueprint) { found = { a, id: a.p().carriedBlueprint }; break; }
+      if (a.p().carriedBlueprints.length) { found = { a, id: a.p().carriedBlueprints[0] }; break; }
     }
   }
   s.ok('a real kill under enforceLocks eventually drops a real blueprint', !!found);
@@ -817,7 +825,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     a.sim.meta.enforceLocks = true;
     for (const t of a.sim.targets) {
       a.realKill(t);
-      if (a.p().carriedBlueprint) { found = { a, first: a.p().carriedBlueprint }; break; }
+      if (a.p().carriedBlueprints.length) { found = { a, first: a.p().carriedBlueprints[0] }; break; }
     }
   }
   if (found) {
@@ -829,7 +837,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
       found.a.realKill(d);
     }
     s.eq('the carried blueprint never changes once carrying, capacity respected',
-      found.a.p().carriedBlueprint, found.first);
+      found.a.p().carriedBlueprints.join(','), found.first);
   } else {
     s.ok('a drop was found to test capacity against', false);
   }
@@ -842,7 +850,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.settle();
   a.sim.beginRun(30);
   for (const t of a.sim.targets) a.realKill(t);
-  s.eq('Stage 1 default: a real clear never drops a blueprint', a.p().carriedBlueprint, null);
+  s.eq('Stage 1 default: a real clear never drops a blueprint', a.p().carriedBlueprints.length, 0);
 }
 
 {
@@ -851,17 +859,17 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.settle();
   a.sim.beginRun(31);
   a.sim.meta.enforceLocks = true;
-  a.p().carriedBlueprint = 'thornspear';
+  a.p().carriedBlueprints = ['thornspear'];
   a.p().hp = 1;
   a.p().hurt(1, a.sim.bus, [0, 0]);
   a.step(1);
   s.eq('a blueprintLost event fires at the moment of death', a.count('blueprintLost'), 1);
-  s.eq('carriedBlueprint is still readable the same tick (not yet cleared)',
-    a.p().carriedBlueprint, 'thornspear');
+  s.eq('carriedBlueprints is still readable the same tick (not yet cleared)',
+    a.p().carriedBlueprints[0], 'thornspear');
 
   let n = 1;
   while (a.p().state === 'dead' && n < CFG.RESPAWN_FRAMES + 5) { a.step(1); n++; }
-  s.eq('the blueprint is gone once the natural respawn actually fires', a.p().carriedBlueprint, null);
+  s.eq('the blueprint is gone once the natural respawn actually fires', a.p().carriedBlueprints.length, 0);
   s.eq('it was never unlocked — lost, not handed in', a.sim.meta.unlocked.thornspear, undefined);
 }
 
@@ -897,7 +905,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   // by design — see its own comment) — the exact expected remainder is
   // computed below from the real roster size, not guessed.
   a.sim.meta.currency = 10000;
-  a.p().carriedBlueprint = 'daggers';
+  a.p().carriedBlueprints = ['daggers'];
   const earned = RunLogic.currencyEarned(a.sim.run.kills + a.sim.targets.length, true);
 
   for (const t of a.sim.targets) a.realKill(t);
@@ -912,7 +920,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     a.sim.meta.currency, 10000 + earned - CFG.META_BLUEPRINT_UNLOCK_COST);
   s.eq('a blueprintUnlocked event fired', a.count('blueprintUnlocked'), 1);
   s.eq('a runEnd event fired exactly once for this transition', a.count('runEnd'), 1);
-  s.eq('the carry slot is empty again in the new level', a.p().carriedBlueprint, null);
+  s.eq('the carry slot is empty again in the new level', a.p().carriedBlueprints.length, 0);
 }
 
 {
@@ -932,7 +940,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   // scenario before it starts.
   a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
   a.sim.meta.enforceLocks = true;
-  a.p().carriedBlueprint = 'warmaul';
+  a.p().carriedBlueprints = ['warmaul'];
   // room-checkpoint-structure spec: the hand-in attempt below now fires at
   // THIS room's own checkpoint (§7d — every room clear hands in, not just
   // a true level end), which happens BEFORE _commitPendingLevel() ever
@@ -966,7 +974,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   s.eq('the refused spend leaves currency untouched; only real earnings land afterward',
     a.sim.meta.currency, currencyBeforeSpend + earned);
   s.eq('no blueprintUnlocked event fired', a.count('blueprintUnlocked'), 0);
-  s.eq('the carry slot is still cleared (consumed, not banked)', a.p().carriedBlueprint, null);
+  s.eq('the carry slot is still cleared (consumed, not banked)', a.p().carriedBlueprints.length, 0);
 }
 
 {
@@ -1000,13 +1008,13 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.sim.meta.enforceLocks = true;
   a.sim.meta.currency = CFG.META_BLUEPRINT_UNLOCK_COST * 2;
   const p0 = a.sim.players[0], p1 = a.sim.players[1];
-  p0.carriedBlueprint = 'blade';
-  p1.carriedBlueprint = 'warmaul';
+  p0.carriedBlueprints = ['blade'];
+  p1.carriedBlueprints = ['warmaul'];
 
   p0.hp = 1; p0.hurt(1, a.sim.bus, [0, 0]);
   a.step(1);
   s.eq('p1 (the survivor) is still carrying, untouched by p0\'s own death',
-    p1.carriedBlueprint, 'warmaul');
+    p1.carriedBlueprints[0], 'warmaul');
   let n = 1;
   while (p0.state === 'dead' && n < CFG.RESPAWN_FRAMES + 5) { a.step(1); n++; }
 
@@ -1050,8 +1058,8 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
   a.sim.meta.enforceLocks = true;
   a.sim.meta.currency = 10000;
-  p0.carriedBlueprint = 'blade';
-  p1.carriedBlueprint = 'blade';   // same weapon, two independent carriers
+  p0.carriedBlueprints = ['blade'];
+  p1.carriedBlueprints = ['blade'];   // same weapon, two independent carriers
 
   // Counting every fire (not a keep-first idiom) so this test can also
   // catch a real double-fire regression of _onRoomClear() itself — a
@@ -1068,13 +1076,178 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
 
   s.eq('the weapon unlocks exactly once', a.sim.meta.unlocked.blade, true);
   s.eq('exactly one blueprintUnlocked event fires, not two', a.count('blueprintUnlocked'), 1);
-  s.eq('both carry slots are empty in the new level', p0.carriedBlueprint, null);
-  s.eq('for both players', p1.carriedBlueprint, null);
+  s.eq('both carry slots are empty in the new level', p0.carriedBlueprints.length, 0);
+  s.eq('for both players', p1.carriedBlueprints.length, 0);
   s.ok('a checkpoint event actually fired to hand these in', !!handedInPayload);
   s.eq('the checkpoint fires exactly once for this one room clear, not twice',
     checkpointFires, 1);
   s.eq('checkpoint.handedIn reports BOTH consumed carries, not just the one that spent currency',
     handedInPayload.handedIn.filter((id) => id === 'blade').length, 2);
+}
+
+/* ============================================================ D24: backpack slot
+ * The one D8 purchase META_BLUEPRINT_CAPACITY's own comment named as
+ * deferred. Capacity is read fresh from meta at every drop, never copied
+ * onto the player — so the purchase needs no live top-up, and the very
+ * next drop after buying already sees the raised capacity. */
+{
+  const a = H.scenario();
+  a.settle();
+  s.eq('a fresh meta does not own the backpack slot', a.sim.meta.backpackSlot, false);
+
+  a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST - 1;
+  s.eq('an unaffordable buy is refused', a.sim.buyBackpackSlot(), false);
+  s.eq('and spends nothing', a.sim.meta.currency, CFG.META_BACKPACK_SLOT_COST - 1);
+  s.eq('and leaves the flag unset', a.sim.meta.backpackSlot, false);
+
+  a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST + 7;
+  s.eq('an affordable buy succeeds', a.sim.buyBackpackSlot(), true);
+  s.eq('spending exactly META_BACKPACK_SLOT_COST', a.sim.meta.currency, 7);
+  s.eq('and flipping the flag', a.sim.meta.backpackSlot, true);
+
+  s.eq('a second buy is refused outright — a one-time flag, not stackable', a.sim.buyBackpackSlot(), false);
+  s.eq('and charges nothing for the refusal', a.sim.meta.currency, 7);
+}
+
+{
+  // The capacity itself, proven through real drops (L8): with the slot
+  // owned, a player already carrying one can receive a second. Same
+  // brute-force-a-real-seed shape the capacity-1 test above uses. Bought
+  // MID-RUN on purpose — the no-live-top-up claim is that the next drop
+  // sees the new capacity immediately, not only after a reset.
+  let found = null;
+  for (let seed = 0; seed < 120 && !found; seed++) {
+    const a = H.scenario({ seed });
+    a.settle();
+    a.sim.beginRun(seed);
+    a.sim.meta.enforceLocks = true;
+    a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST;
+    s.ok('bought mid-run (seed ' + seed + ')', a.sim.buyBackpackSlot()) || null;
+    for (const t of a.sim.targets) a.realKill(t);
+    for (let i = 0; i < 12 && a.p().carriedBlueprints.length < 2; i++) {
+      const d = a.sim.addTarget(new C.Combat.Dummy(500 + i, a.b().x, a.b().y, 10));
+      a.sim._levelRosterIds.push(d.id);
+      a.realKill(d);
+    }
+    if (a.p().carriedBlueprints.length === 2) found = a;
+  }
+  s.ok('with the slot owned, a real second drop lands on a player already carrying one', !!found);
+  if (found) {
+    s.eq('never a third — capacity is exactly 2', found.p().carriedBlueprints.length, 2);
+    for (let i = 0; i < 10; i++) {
+      const d = found.sim.addTarget(new C.Combat.Dummy(700 + i, found.b().x, found.b().y, 10));
+      found.sim._levelRosterIds.push(d.id);
+      found.realKill(d);
+    }
+    s.eq('and stays exactly 2 across many more real kills', found.p().carriedBlueprints.length, 2);
+    s.eq('two blueprintDrop events fired, one per slot filled', found.count('blueprintDrop'), 2);
+  }
+}
+
+{
+  // Hand-in of TWO different locked blueprints at one checkpoint: both
+  // consumed, both unlocked, currency spent twice, two events. Same
+  // clear-then-arm ordering the single-carry hand-in tests above use, for
+  // the same contamination reason.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(46);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.backpackSlot = true;
+  a.sim.meta.currency = 10000;
+  a.p().carriedBlueprints = ['daggers', 'warmaul'];
+  let handedInPayload = null;
+  a.sim.bus.on('checkpoint', (e) => { if (!handedInPayload) handedInPayload = e; });
+  for (const t of a.sim.targets) a.realKill(t);
+  a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
+  a.step(1);
+  s.ok('a checkpoint fired', !!handedInPayload);
+  s.eq('both blueprints were reported handed in, in acquisition order',
+    handedInPayload.handedIn.join(','), 'daggers,warmaul');
+  s.eq('the first unlocked', a.sim.meta.unlocked.daggers, true);
+  s.eq('the second unlocked too', a.sim.meta.unlocked.warmaul, true);
+  s.eq('currency was spent once per unlock', a.sim.meta.currency, 10000 - 2 * CFG.META_BLUEPRINT_UNLOCK_COST);
+  s.eq('two blueprintUnlocked events fired', a.count('blueprintUnlocked'), 2);
+  s.eq('the carry slots are empty', a.p().carriedBlueprints.length, 0);
+}
+
+{
+  // One locked + one already-unlocked carried together: both consumed,
+  // currency spent exactly once.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(47);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.backpackSlot = true;
+  a.sim.meta.currency = 10000;
+  a.sim.meta.unlocked.daggers = true;
+  a.p().carriedBlueprints = ['daggers', 'warmaul'];
+  for (const t of a.sim.targets) a.realKill(t);
+  a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
+  a.step(1);
+  s.eq('only the locked one costs anything', a.sim.meta.currency, 10000 - CFG.META_BLUEPRINT_UNLOCK_COST);
+  s.eq('exactly one blueprintUnlocked event', a.count('blueprintUnlocked'), 1);
+  s.eq('both slots still emptied', a.p().carriedBlueprints.length, 0);
+}
+
+{
+  // Two locked, affordable for ONE: FIFO — whichever was found first is
+  // the one that unlocks; the second is consumed unaffordably (the named
+  // simplification), never banked.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(48);
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.backpackSlot = true;
+  a.sim.meta.currency = CFG.META_BLUEPRINT_UNLOCK_COST;   // exactly one unlock's worth
+  a.p().carriedBlueprints = ['warmaul', 'daggers'];
+  for (const t of a.sim.targets) a.realKill(t);
+  a.b().x = a.sim.exit[0]; a.b().y = a.sim.exit[1] - a.b().h;
+  a.step(1);
+  s.eq('the FIRST-acquired blueprint is the one that unlocks', a.sim.meta.unlocked.warmaul, true);
+  s.eq('the second does not', a.sim.meta.unlocked.daggers, undefined);
+  s.eq('currency bottoms out at zero, never negative', a.sim.meta.currency, 0);
+  s.eq('both slots are still emptied — spent either way', a.p().carriedBlueprints.length, 0);
+}
+
+{
+  // Death while carrying two: one blueprintLost per item, same payload
+  // shape, both ids present.
+  const a = H.scenario();
+  a.settle();
+  a.sim.beginRun(49);
+  a.sim.meta.enforceLocks = true;
+  a.sim.meta.backpackSlot = true;
+  a.p().carriedBlueprints = ['thornspear', 'daggers'];
+  a.p().hp = 1;
+  a.p().hurt(1, a.sim.bus, [0, 0]);
+  a.step(1);
+  s.eq('two blueprintLost events fire at the moment of death', a.count('blueprintLost'), 2);
+  s.eq('carrying both ids', a.events('blueprintLost').map((e) => e.payload.id).sort().join(','), 'daggers,thornspear');
+  let n = 1;
+  while (a.p().state === 'dead' && n < CFG.RESPAWN_FRAMES + 5) { a.step(1); n++; }
+  s.eq('both gone once the natural respawn fires', a.p().carriedBlueprints.length, 0);
+  s.eq('neither was unlocked', a.sim.meta.unlocked.thornspear, undefined);
+}
+
+{
+  // hash(): the array is walked, and its ORDER is part of the state —
+  // asserted directly, not assumed (FIFO hand-in order is observable
+  // behavior, so two carriers with the same set in different orders are
+  // genuinely different states).
+  const base = H.scenario(); base.settle(); base.sim.beginRun(40);
+  const ab = H.scenario(); ab.settle(); ab.sim.beginRun(40);
+  ab.p().carriedBlueprints = ['daggers', 'warmaul'];
+  s.ok('a two-item carry changes the hash', base.sim.hash() !== ab.sim.hash());
+  const ba = H.scenario(); ba.settle(); ba.sim.beginRun(40);
+  ba.p().carriedBlueprints = ['warmaul', 'daggers'];
+  s.ok('the same two items in the other order hash differently — order is state', ab.sim.hash() !== ba.sim.hash());
+  const altMeta = H.scenario(); altMeta.settle(); altMeta.sim.beginRun(40);
+  altMeta.sim.meta.backpackSlot = true;
+  s.ok('a differing meta.backpackSlot changes the hash', base.sim.hash() !== altMeta.sim.hash());
 }
 
 {
@@ -1091,8 +1264,8 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   s.ok('a differing meta.enforceLocks changes the hash', base.sim.hash() !== alt2.sim.hash());
 
   const alt3 = H.scenario(); alt3.settle(); alt3.sim.beginRun(40);
-  alt3.p().carriedBlueprint = 'daggers';
-  s.ok('a differing carriedBlueprint changes the hash', base.sim.hash() !== alt3.sim.hash());
+  alt3.p().carriedBlueprints = ['daggers'];
+  s.ok('a differing carriedBlueprints changes the hash', base.sim.hash() !== alt3.sim.hash());
 
   // Abilities spec §4's four enhancement flags — both the meta-level
   // record and each player-side mirror.

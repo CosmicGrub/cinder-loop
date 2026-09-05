@@ -199,8 +199,9 @@ function Sim(opts) {
     if (dropId) {
       for (var pi = 0; pi < self.players.length; pi++) {
         var pl = self.players[pi];
-        if (pl.alive() && !pl.carriedBlueprint) {
-          pl.carriedBlueprint = dropId;
+        // D24: "has room," not "is empty" — capacity read fresh from meta.
+        if (pl.alive() && pl.carriedBlueprints.length < _blueprintCapacity(self.meta)) {
+          pl.carriedBlueprints.push(dropId);
           self.bus.emit('blueprintDrop', { id: dropId, playerId: pl.id, x: e.x, y: e.y });
           break;
         }
@@ -483,6 +484,27 @@ Sim.prototype.buyMaxHp = function () {
     var p = this.players[i];
     if (p.alive()) { p.maxHp += CFG.META_MAXHP_GAIN; p.hp += CFG.META_MAXHP_GAIN; }
   }
+  return true;
+};
+
+// D24: how many blueprints one player may carry at once. Read fresh from
+// meta at every drop (the one site that cares, the kill-roster listener in
+// the constructor) — never copied onto the player, so buyBackpackSlot()
+// below needs no live top-up loop the way buyMaxHp does: the very next
+// drop after purchase already sees the raised capacity, mid-run or not.
+function _blueprintCapacity(meta) {
+  return CFG.META_BLUEPRINT_CAPACITY + (meta.backpackSlot ? 1 : 0);
+}
+
+// D24: the backpack slot. Same shape as the four §4 purchases below —
+// double-purchase guard, spend, flip the flag — minus their live top-up
+// loop, for the reason _blueprintCapacity's own comment gives.
+Sim.prototype.buyBackpackSlot = function () {
+  if (this.meta.backpackSlot) return false;
+  var result = MetaLogic.spendOnBackpackSlot(this.meta.currency);
+  if (!result.ok) return false;
+  this.meta.currency = result.currency;
+  this.meta.backpackSlot = true;
   return true;
 };
 
@@ -1049,32 +1071,39 @@ Sim.prototype._handInCarriedBlueprints = function () {
   var handedIn = [];
   for (var hi = 0; hi < this.players.length; hi++) {
     var carrier = this.players[hi];
-    if (!carrier.alive() || !carrier.carriedBlueprint) continue;
-    var weaponId = carrier.carriedBlueprint;
-    // Recorded HERE, before either branch below — every carry consumed at
-    // this transition belongs in handedIn, including the case a SECOND
-    // carrier of the identical still-locked weapon hits (the first
-    // carrier processed this same loop already unlocked it, so
-    // isUnlocked() below correctly makes THIS spend a no-op) and the
-    // unaffordable case further down. An earlier draft pushed only inside
-    // those two branches and silently dropped this one — a real,
-    // adversarially-found gap: the carry slot empties either way, so the
-    // event payload must say so either way too, not just report the
-    // subset that also happened to spend currency.
-    handedIn.push(weaponId);
-    carrier.carriedBlueprint = null;
-    if (MetaLogic.isUnlocked(this.meta, weaponId)) continue;   // nothing to spend on
-    var result = MetaLogic.spendOnUnlock(this.meta.currency);
-    if (result.ok) {
-      this.meta.currency = result.currency;
-      this.meta.unlocked[weaponId] = true;
-      this.bus.emit('blueprintUnlocked', { id: weaponId, playerId: carrier.id });
+    if (!carrier.alive()) continue;
+    // D24: every item carried, in acquisition (array) order — so a player
+    // carrying two different locked blueprints and short on currency for
+    // both opportunistically unlocks whichever they found FIRST. Not a
+    // rule designed around; the natural consequence of FIFO push order.
+    for (var ci = 0; ci < carrier.carriedBlueprints.length; ci++) {
+      var weaponId = carrier.carriedBlueprints[ci];
+      // Recorded HERE, before either branch below — every carry consumed at
+      // this transition belongs in handedIn, including the case a SECOND
+      // copy of the identical still-locked weapon hits (whether a second
+      // carrier, or D24's second slot on the same carrier — the first copy
+      // processed this same loop already unlocked it, so isUnlocked()
+      // below correctly makes THIS spend a no-op) and the unaffordable
+      // case further down. An earlier draft pushed only inside those two
+      // branches and silently dropped this one — a real, adversarially-
+      // found gap: the carry slot empties either way, so the event payload
+      // must say so either way too, not just report the subset that also
+      // happened to spend currency.
+      handedIn.push(weaponId);
+      if (MetaLogic.isUnlocked(this.meta, weaponId)) continue;   // nothing to spend on
+      var result = MetaLogic.spendOnUnlock(this.meta.currency);
+      if (result.ok) {
+        this.meta.currency = result.currency;
+        this.meta.unlocked[weaponId] = true;
+        this.bus.emit('blueprintUnlocked', { id: weaponId, playerId: carrier.id });
+      }
+      // An unaffordable hand-in is a real, named simplification, not a
+      // banked-for-later queue: the blueprint is spent either way (the
+      // carry slot always empties at this transition, matching D4's own
+      // "hand in AT a transition" as something that happens TO the
+      // blueprint here, not something the player separately chooses).
     }
-    // An unaffordable hand-in is a real, named simplification, not a
-    // banked-for-later queue: the blueprint is spent either way (the
-    // carry slot always empties at this transition, matching D4's own
-    // "hand in AT a transition" as something that happens TO the
-    // blueprint here, not something the player separately chooses).
+    carrier.carriedBlueprints = [];
   }
   return handedIn;
 };
@@ -1158,8 +1187,10 @@ Sim.prototype._stepRun = function () {
       // The clearing itself still happens naturally at resetTransient();
       // this is only the notification, the same "state IS the signal"
       // shape 60-run.js's own header already uses for phase transitions.
-      if (this.players[i].carriedBlueprint) {
-        this.bus.emit('blueprintLost', { id: this.players[i].carriedBlueprint, playerId: this.players[i].id });
+      // D24: one event per carried item, same payload shape as before — no
+      // consumer of 'blueprintLost' needs to change.
+      for (var bi = 0; bi < this.players[i].carriedBlueprints.length; bi++) {
+        this.bus.emit('blueprintLost', { id: this.players[i].carriedBlueprints[bi], playerId: this.players[i].id });
       }
     }
     if (!isDead && this._wasDead[i]) {
@@ -1294,7 +1325,10 @@ Sim.prototype.hash = function () {
     // future dash/parry/stagger gets the enhanced behavior), the same
     // "affects later ticks" bar the three fields above already hold to.
     this.meta.dashExtraCharge ? 1 : 0, this.meta.dashExtIframes ? 1 : 0,
-    this.meta.parryRiposte ? 1 : 0, this.meta.parryReflect ? 1 : 0
+    this.meta.parryRiposte ? 1 : 0, this.meta.parryReflect ? 1 : 0,
+    // D24: decides the very next drop's capacity — same "affects later
+    // ticks" bar as the four flags above.
+    this.meta.backpackSlot ? 1 : 0
   ], i, p, b, t;
   for (i = 0; i < DATA.WEAPON_IDS.length; i++) {
     out.push(this.meta.unlocked[DATA.WEAPON_IDS[i]] ? 1 : 0);
@@ -1315,7 +1349,7 @@ Sim.prototype.hash = function () {
       p.attack ? p.attack.id : '-', p.attack ? p.attack.frame : -1,
       p.attack ? p.attack.hits.length : 0, p.actionLock,
       p.weapon === undefined ? '-' : p.weapon,
-      p.carriedBlueprint === undefined || p.carriedBlueprint === null ? '-' : p.carriedBlueprint,
+      p.carriedBlueprints && p.carriedBlueprints.length ? p.carriedBlueprints.join(',') : '-',   // D24: order-sensitive on purpose
       p.wallJumpLock === undefined ? 0 : p.wallJumpLock,
       p.ledgeGrabLock === undefined ? 0 : p.ledgeGrabLock,
       p.ledgeHang === undefined ? 0 : p.ledgeHang,

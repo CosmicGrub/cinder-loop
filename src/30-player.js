@@ -205,7 +205,10 @@ Player.prototype.resetTransient = function () {
   // Deliberately NOT cleared by teleport() (below) — a live level->boss
   // transition is not a death, and D4 says a blueprint survives all the way
   // to "a transition" (hand-in), not merely to the next room.
-  this.carriedBlueprint = null;
+  // D24: an array, up to a capacity 70-sim.js decides (never stored here —
+  // Player has no Meta access, the same one-way dependency this file has
+  // always kept). `.length` IS the fill level; no null-padding.
+  this.carriedBlueprints = [];
   // The box this character's poses were authored in. Combat mirrors and
   // feet-anchors against it, so entities of different sizes each get their own.
   this.poseW = CFG.PLAYER_W;

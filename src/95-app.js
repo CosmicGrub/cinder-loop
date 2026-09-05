@@ -518,6 +518,7 @@ function boot(canvas, hud, seed) {
     if (e.code === 'F8') { if (sim.buyDashExtIframes()) saveMeta(sim.meta); }
     if (e.code === 'F9') { if (sim.buyParryRiposte()) saveMeta(sim.meta); }
     if (e.code === 'F10') { if (sim.buyParryReflect()) saveMeta(sim.meta); }
+    if (e.code === 'F12') { if (sim.buyBackpackSlot()) saveMeta(sim.meta); }   // D24
     // D16 (summon-primitive spec §6): debug-only Caller spawn, a fixed
     // distance in front of player 0 — the same direct sim.addEnemy() call
     // the boot-path Dummy already makes via sim.addTarget() above,
