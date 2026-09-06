@@ -22,6 +22,17 @@ command -v "$PYTHON" >/dev/null 2>&1 || PYTHON=python3
 command -v "$NODE"   >/dev/null 2>&1 || { echo "FATAL: no node on PATH" >&2; exit 127; }
 command -v "$PYTHON" >/dev/null 2>&1 || { echo "FATAL: no python on PATH" >&2; exit 127; }
 
+# 2026-09-06 audit (#4.25): tests/cdp.js's whole zero-npm-dependency design
+# rests on Node's global WebSocket, which is only unflagged from Node ~v22
+# onward — an older LTS would fail deep inside cdp.js with a raw, confusing
+# ReferenceError instead of a clear message pointing at the real cause. Fail
+# here instead, at the one place every suite run passes through first.
+NODE_MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
+  echo "FATAL: node $("$NODE" --version) is too old — tests/cdp.js needs Node >= 22 for its global WebSocket (unflagged since ~v22)." >&2
+  exit 127
+fi
+
 FAILED=0
 TOTAL=0
 PASSED=0

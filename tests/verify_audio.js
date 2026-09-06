@@ -129,6 +129,39 @@ function threw(fn) { try { fn(); return false; } catch (e) { return true; } }
   for (const name of TRIGGER_NAMES) {
     s.ok('the SFX table defines a real cue for trigger "' + name + '"', !!SFX[name]);
   }
+
+  // 2026-09-06 audit (#3.20): DATA.SFX_IDS mirrors the validated-key-list
+  // convention ENEMY_IDS/WEAPON_IDS use, but 85-audio.js's own real
+  // TRIGGERS list was never cross-checked against it — a hand-typed
+  // duplicate that could silently drift. 85-audio.js now asserts
+  // TRIGGERS subset-of SFX_IDS at module load (loudly, not silently
+  // dropping a cue on a future typo); confirmed here as a black-box
+  // check against the two real, already-loaded tables, proving today's
+  // real data actually satisfies the guard the module import above did
+  // not throw on.
+  s.eq('every real TRIGGERS name is a real SFX_IDS entry (85-audio.js\'s own module-load guard)',
+    TRIGGER_NAMES.filter((n) => SFX_IDS.indexOf(n) === -1).length, 0);
+}
+{
+  // The guard itself actually fires, not just "the real data happens to
+  // pass it" — build the same isolated sandbox loadAudio() uses (00-core
+  // + 10-data + 85-audio in a fresh vm context), but corrupt
+  // DATA.SFX_IDS AFTER 10-data.js runs and BEFORE 85-audio.js's own
+  // module code runs, proving the assertion is real, executed code, not
+  // a comment. Never mutates the shared C.DATA.SFX_IDS other tests in
+  // this file still need intact.
+  const vm = require('vm');
+  const sandbox = { CINDER: {} };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(
+    'Math.random = function () { throw new Error("Math.random() called inside audio code"); };',
+    ctx
+  );
+  vm.runInContext(H.readSrc('00-core.js'), ctx, { filename: 'src/00-core.js' });
+  vm.runInContext(H.readSrc('10-data.js'), ctx, { filename: 'src/10-data.js' });
+  sandbox.CINDER.DATA.SFX_IDS = ['jump'];   // missing almost every real trigger name
+  s.ok('the module-load guard actually throws on a genuinely mismatched SFX_IDS',
+    threw(() => vm.runInContext(H.readSrc('85-audio.js'), ctx, { filename: 'src/85-audio.js' })));
 }
 
 /* ============================================================ 2. construction */

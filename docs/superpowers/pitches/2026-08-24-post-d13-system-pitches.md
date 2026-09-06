@@ -282,6 +282,23 @@ Tier 2 also punts on — see **D26** above, which now owns that gap.
 
 ---
 
+## A named cross-cutting pattern: invisible-but-gameplay-affecting state (2026-09-06 audit)
+
+Which weapon is equipped changes damage scaling with zero on-screen
+indicator (D15's own named, unaddressed gap). **D19 (shipped 2026-09-06)
+adds a second, identical-shaped gap**: which stat colour is currently
+dominant now also changes Roll/Dash/Parry cooldowns and windows mid-run,
+again with no signal a player can see. Unlike the shop-UI gap (D26,
+above), this one compounds silently rather than blocking a specific
+feature outright — a player now has two separate pieces of invisible
+state each materially changing moment-to-moment ability behavior. The
+data both would need already exists and is already correct on the sim
+side (weapon name, enemy name, all three stat colour values, and now
+`dominantColour(stats)` itself) — this is purely a render call away from
+existing (2026-09-06 audit's own scaffolding finding #19), and is the
+natural single HUD pass that closes both gaps at once rather than two
+separate small UI features.
+
 ## Full pitch detail
 
 The complete grounding digest, all 15 individual pitches (5 domain decks ×
@@ -289,4 +306,14 @@ The complete grounding digest, all 15 individual pitches (5 domain decks ×
 reasoning are preserved in this session's workflow transcript
 (`wx1hnawlh`). Ask to expand any single system above into its full
 file-level implementation shape before it goes through this project's own
-brainstorming → spec → plan flow.
+brainstorming → spec → plan flow — **worth doing deliberately, not
+skipping as "the pitch summary above is probably enough" (2026-09-06
+audit):** D17 shipped from a summary this short and it missed an entire
+physics dependency (the wall-leniency mechanism `25-body.js` needed
+before its own core mechanic could work at all) that only surfaced once
+brainstorming actually started. D18, D20, D22, and D23 — the four
+original-nine systems still unbuilt — each carry the same risk: their own
+full per-file-line grounding exists only in that same ephemeral workflow
+transcript, not in any committed file, and each one's own one-paragraph
+summary above should be treated as a starting point for that system's own
+brainstorming pass, not a substitute for it.

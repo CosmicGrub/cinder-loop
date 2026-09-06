@@ -209,6 +209,13 @@ def strip_comments(src):
     call. Failing the build on prose teaches people to stop writing prose.
     The `[^:]` guard keeps `https://` from being mistaken for a comment, so a
     real URL is still caught.
+
+    2026-09-06 audit (#4.27): tests/verify_arch.js's own `code()` helper
+    duplicates these same two regexes, independently hand-written in a
+    different language, for the identical reason (strip comments before a
+    banned-token scan). They can't be literally unified across Python/JS —
+    this comment (and its mirror in verify_arch.js) exists so an edit to
+    one doesn't silently drift from the other unnoticed.
     """
     src = re.sub(r"/\*[\s\S]*?\*/", " ", src)
     src = re.sub(r"(^|[^:])//[^\n]*", r"\1 ", src)

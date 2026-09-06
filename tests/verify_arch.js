@@ -16,7 +16,13 @@ const s = new H.Suite('verify_arch');
 
 /* Strip comments before scanning for banned identifiers. Prose that mentions
  * `document` is not a use of `document`, and conflating the two trains people
- * to work around the gate instead of with it. */
+ * to work around the gate instead of with it.
+ *
+ * 2026-09-06 audit (#4.27): duplicates build.py's own strip_comments()
+ * line-for-line, independently hand-written in Python for the identical
+ * reason. They can't be literally unified across languages — this comment
+ * (and its mirror in build.py) exists so an edit to one doesn't silently
+ * drift from the other unnoticed. */
 function code(src) {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
