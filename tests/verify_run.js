@@ -147,6 +147,140 @@ const CFG = C.CFG, RunLogic = C.RunLogic, Run = C.Run, DATA = C.DATA, Gen = C.Ge
     s.ok('a flying template is placed above its platform, not resting on it',
       p && p.y < platforms.find((pl) => Math.floor((pl.x0 + pl.x1) / 2) * CFG.TILE === p.x).y * CFG.TILE);
   }
+
+  // D27 (2026-09-06 audit): every call above passes NO third (roomIndex)
+  // argument — this is the direct regression proving they still exercise
+  // the exact pre-D27 default (one of each, unmodified), not a
+  // coincidentally-matching new path.
+  s.eq('with no roomIndex, the composition is still exactly DATA.ENEMY_IDS, unmodified',
+    RunLogic.placeEnemies(platforms, 1).map((p) => p.tid).join(','), DATA.ENEMY_IDS.join(','));
+}
+{
+  // D27: room 0, the "gentler opener" — 2 or 3 distinct templates, never
+  // 1, never all 4, and always in DATA.ENEMY_IDS' own relative order
+  // (the deliberate teaching progression this file's own header already
+  // names), across a real seed sweep, not a single lucky seed.
+  const platforms = [
+    { x0: 2, x1: 8, y: 30, spur: false },
+    { x0: 20, x1: 26, y: 30, spur: false },
+    { x0: 40, x1: 46, y: 30, spur: false },
+    { x0: 60, x1: 70, y: 28, spur: false },
+    { x0: 80, x1: 86, y: 26, spur: false }
+  ];
+  let sawTwo = false, sawThree = false;
+  for (let seed = 1; seed <= 60; seed++) {
+    const placed = RunLogic.placeEnemies(platforms, seed, 0);
+    const ids = placed.map((p) => p.tid);
+    const distinct = new Set(ids);
+    s.ok('seed ' + seed + ': room 0 has 2 or 3 DISTINCT templates, never 1 or 4',
+      distinct.size >= 2 && distinct.size <= 3, distinct.size);
+    s.eq('seed ' + seed + ': room 0 has no repeats (distinct count equals placed count)',
+      distinct.size, ids.length);
+    s.ok('seed ' + seed + ': every chosen id is a real roster entry',
+      ids.every((tid) => DATA.ENEMY_IDS.indexOf(tid) !== -1));
+    const expectedOrder = DATA.ENEMY_IDS.filter((tid) => distinct.has(tid));
+    s.eq('seed ' + seed + ": room 0's own order matches DATA.ENEMY_IDS' relative order",
+      ids.join(','), expectedOrder.join(','));
+    if (distinct.size === 2) sawTwo = true;
+    if (distinct.size === 3) sawThree = true;
+  }
+  s.ok('across the sweep, room 0 actually produced a 2-template room at least once', sawTwo);
+  s.ok('and a 3-template room at least once (both real outcomes, not just one)', sawThree);
+}
+{
+  // D27: the room right before the boss door — every template, PLUS 1-2
+  // repeats, across a real seed sweep.
+  const platforms = [
+    { x0: 2, x1: 8, y: 30, spur: false },
+    { x0: 20, x1: 26, y: 30, spur: false },
+    { x0: 40, x1: 46, y: 30, spur: false },
+    { x0: 60, x1: 70, y: 28, spur: false },
+    { x0: 80, x1: 86, y: 26, spur: false },
+    { x0: 100, x1: 108, y: 24, spur: false }
+  ];
+  const lastRoom = CFG.ROOM_COUNT - 1;
+  let sawOneRepeat = false, sawTwoRepeats = false;
+  for (let seed = 1; seed <= 60; seed++) {
+    const placed = RunLogic.placeEnemies(platforms, seed, lastRoom);
+    const ids = placed.map((p) => p.tid);
+    s.ok('seed ' + seed + ': the last room places at least all 4 base templates',
+      ids.length >= DATA.ENEMY_IDS.length, ids.length);
+    s.ok('seed ' + seed + ': and no more than 2 repeats beyond the base 4',
+      ids.length <= DATA.ENEMY_IDS.length + 2, ids.length);
+    s.ok('seed ' + seed + ': every base template is present at least once',
+      DATA.ENEMY_IDS.every((tid) => ids.indexOf(tid) !== -1));
+    if (ids.length === DATA.ENEMY_IDS.length + 1) sawOneRepeat = true;
+    if (ids.length === DATA.ENEMY_IDS.length + 2) sawTwoRepeats = true;
+  }
+  s.ok('across the sweep, the last room produced exactly 1 repeat at least once', sawOneRepeat);
+  s.ok('and exactly 2 repeats at least once (both real outcomes, not just one)', sawTwoRepeats);
+}
+{
+  // D27: a middle room (strictly between first and last) gets the SAME
+  // unmodified default as no-roomIndex-at-all — proving "normal" isn't a
+  // fourth, separately-coded case that could silently drift from the
+  // pre-D27 baseline.
+  const platforms = [
+    { x0: 2, x1: 8, y: 30, spur: false },
+    { x0: 20, x1: 26, y: 30, spur: false },
+    { x0: 60, x1: 70, y: 28, spur: false }
+  ];
+  if (CFG.ROOM_COUNT > 2) {
+    for (let mid = 1; mid < CFG.ROOM_COUNT - 1; mid++) {
+      s.eq('middle room ' + mid + ' matches the exact no-roomIndex default',
+        RunLogic.placeEnemies(platforms, 7, mid).map((p) => p.tid).join(','),
+        RunLogic.placeEnemies(platforms, 7).map((p) => p.tid).join(','));
+    }
+  } else {
+    s.ok('CFG.ROOM_COUNT has no true middle room to test at its current value', true, CFG.ROOM_COUNT);
+  }
+}
+{
+  // D27 determinism (L4): same seed + same roomIndex -> byte-identical
+  // composition; same roomIndex + a DIFFERENT seed -> real variance, not
+  // just theoretical support for it.
+  const platforms = [
+    { x0: 2, x1: 8, y: 30, spur: false },
+    { x0: 20, x1: 26, y: 30, spur: false },
+    { x0: 40, x1: 46, y: 30, spur: false },
+    { x0: 60, x1: 70, y: 28, spur: false }
+  ];
+  const a1 = RunLogic.placeEnemies(platforms, 11, 0);
+  const a2 = RunLogic.placeEnemies(platforms, 11, 0);
+  s.eq('same seed + same roomIndex -> byte-identical composition',
+    JSON.stringify(a1), JSON.stringify(a2));
+
+  let sawDifference = false;
+  const baseline = RunLogic.placeEnemies(platforms, 1, 0).map((p) => p.tid).join(',');
+  for (let seed = 2; seed <= 30 && !sawDifference; seed++) {
+    if (RunLogic.placeEnemies(platforms, seed, 0).map((p) => p.tid).join(',') !== baseline) sawDifference = true;
+  }
+  s.ok('a different seed, same roomIndex, produces a real, actually-observed difference', sawDifference);
+}
+{
+  // D27 integration: a full beginRun()-driven multi-room sequence actually
+  // reaches _enterRoom with the real roomIndex at each step, and room 0's
+  // resulting composition genuinely differs from what the OLD unconditional
+  // DATA.ENEMY_IDS loop would have produced for the same seed — proving the
+  // wiring through _enterRoom reaches the new logic, not just that
+  // placeEnemies behaves correctly called in isolation.
+  const a = H.scenario({ seed: 21 });
+  a.settle();
+  a.sim.beginRun(21);
+  s.eq('a fresh run starts at room 0', a.sim.run.roomIndex, 0);
+
+  const room0Ids = a.sim.targets.map((t) => t.tid).filter((tid) => DATA.ENEMY_IDS.indexOf(tid) !== -1);
+  const room0Distinct = new Set(room0Ids);
+  s.ok('a real beginRun() room 0 actually has 2-3 distinct regular templates',
+    room0Distinct.size >= 2 && room0Distinct.size <= 3, room0Distinct.size + ': ' + room0Ids.join(','));
+  s.ok('genuinely fewer than the full 4 the old unconditional loop always placed',
+    room0Distinct.size < DATA.ENEMY_IDS.length);
+
+  a.clearRoomAndAdvance(CFG.ROOM_COUNT - 1);
+  s.eq('now on the last room', a.sim.run.roomIndex, CFG.ROOM_COUNT - 1);
+  const lastRoomIds = a.sim.targets.map((t) => t.tid).filter((tid) => DATA.ENEMY_IDS.indexOf(tid) !== -1);
+  s.ok('a real beginRun() last room has at least the full 4 base templates',
+    lastRoomIds.length >= DATA.ENEMY_IDS.length, lastRoomIds.length + ': ' + lastRoomIds.join(','));
 }
 
 /* =============================================================================

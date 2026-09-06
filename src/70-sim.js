@@ -772,7 +772,12 @@ Sim.prototype._enterRoom = function (roomIndex, gen) {
   // "several sequences colliding at the same distance from a shared root"
   // bug class this file's own mix32 header already names as real, not
   // hypothetical.
-  var placed = RunLogic.placeEnemies(gen.platforms, RunLogic.deriveEnemySeed(roomSeed));
+  // D27 (2026-09-06 audit): roomIndex is already in scope here as this
+  // method's own parameter — threading it through is what lets the
+  // opening room draw a gentler subset and the room right before the boss
+  // draw an escalated one, instead of every room placing an identical
+  // one-of-each roster.
+  var placed = RunLogic.placeEnemies(gen.platforms, RunLogic.deriveEnemySeed(roomSeed), roomIndex);
   this._levelRosterIds = [];
   for (i = 0; i < placed.length; i++) {
     this._levelRosterIds.push(this.addEnemy(placed[i].tid, placed[i].x, placed[i].y, placed[i].seed).id);

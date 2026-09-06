@@ -209,7 +209,58 @@ function spend(currency, cost) {
  * template, spaced evenly across eligible (non-spawn, non-spur) platforms,
  * so each is met alone before any are met together — the same reasoning
  * the ported original already stated for its own layout. */
-function placeEnemies(platforms, seed) {
+// D27 (2026-09-06 audit): distinct random picks from `pool` — order is
+// NOT preserved (see pickRoomComposition's own room-0 branch, which
+// re-sorts the result back into the pool's own order for a specific
+// reason of its own, rather than trusting this function to do it).
+function pickDistinct(rng, pool, count) {
+  var remaining = pool.slice(), picked = [];
+  count = Math.min(count, remaining.length);
+  for (var k = 0; k < count; k++) {
+    var idx = rng.int(remaining.length);
+    picked.push(remaining[idx]);
+    remaining.splice(idx, 1);
+  }
+  return picked;
+}
+
+// D27: which regular templates a given room draws from, and how many of
+// each. `roomIndex` undefined, or any room strictly between the first and
+// last, is the pre-D27 default: one of each, unmodified — the "normal"
+// case, not a fallback bolted on afterward. This is what keeps every
+// existing no-roomIndex caller (tests/verify_run.js's three calls)
+// producing the exact same composition as before, unchanged.
+function pickRoomComposition(rng, roomIndex) {
+  var all = DATA.ENEMY_IDS;
+  if (roomIndex === CFG.ROOM_COUNT - 1) {
+    // The room right before the boss door: every template, PLUS 1-2
+    // repeats — a felt escalation, not just "the same four again." Named
+    // edge case, not defended against: if CFG.ROOM_COUNT were ever 1, this
+    // branch (checked first) and the room-0 branch below would both match
+    // the same room; escalation wins by check order. Not worth
+    // special-casing a constant this project has no stated intention of
+    // changing (D14 locks it at 3).
+    var order = all.slice();
+    var repeats = 1 + rng.int(2);
+    for (var k = 0; k < repeats; k++) order.push(all[rng.int(all.length)]);
+    return order;
+  }
+  if (roomIndex === 0) {
+    // A gentler opener: 2-3 templates, not all 4. DATA.ENEMY_IDS' own
+    // order (melee, charge, shoot, fly) is already a deliberate teaching
+    // progression — this file's own header comment already says so — so
+    // the subset is chosen randomly but re-filtered back into ENEMY_IDS'
+    // own relative order, not left in whatever order pickDistinct happened
+    // to draw them, so the intro still reads as a deliberate ramp, not a
+    // shuffled one.
+    var count = 2 + rng.int(2);
+    var chosen = pickDistinct(rng, all, count);
+    return all.filter(function (id) { return chosen.indexOf(id) !== -1; });
+  }
+  return all.slice();
+}
+
+function placeEnemies(platforms, seed, roomIndex) {
   var candidates = [], i;
   for (i = 1; i < platforms.length; i++) {
     if (!platforms[i].spur) candidates.push(i);
@@ -217,7 +268,7 @@ function placeEnemies(platforms, seed) {
   if (!candidates.length) return [];
 
   var rng = new RNG(seed);
-  var order = DATA.ENEMY_IDS;
+  var order = pickRoomComposition(rng, roomIndex);
   var placed = [], step = Math.max(1, Math.floor(candidates.length / order.length));
   for (var r = 0; r < order.length; r++) {
     var ci = Math.min(r * step, candidates.length - 1);
