@@ -33,7 +33,10 @@ const TRIGGER_NAMES = [
   'jump', 'doubleJump', 'land', 'rollStart', 'wallJump', 'slamLand',
   'attackStart', 'hit', 'targetDown', 'hurt', 'death', 'respawn',
   'pickup', 'telegraph', 'blueprintUnlocked',
-  'dashStart', 'parry'
+  'dashStart', 'parry',
+  // 2026-09-06 audit: six real events wired for the first time — see
+  // 85-audio.js's own TRIGGERS comment and 10-data.js's SFX entries.
+  'parryStart', 'ledgeGrab', 'ledgeClimb', 'statGain', 'blueprintDrop', 'blueprintLost'
 ];
 
 /* A fake AudioContext that logs which node TYPE it was asked to build,

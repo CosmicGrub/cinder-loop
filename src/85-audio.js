@@ -79,7 +79,12 @@ var TRIGGERS = [
   // cue of its own, the same as rollEnd's own precedent (not in this list
   // either) — only the START of a committed burst reads as a real,
   // distinct moment worth a sound.
-  'dashStart', 'parry'
+  'dashStart', 'parry',
+  // 2026-09-06 audit: six real events that fired silently since each one's
+  // own feature shipped — see each SFX entry's own comment (10-data.js) for
+  // why. ledgeRelease is deliberately NOT here, matching crouch/uncrouch/
+  // wallTouch's own established "visual-only, no dedicated sound" shape.
+  'parryStart', 'ledgeGrab', 'ledgeClimb', 'statGain', 'blueprintDrop', 'blueprintLost'
 ];
 
 // Adversarially found (v0.2.16): the idempotency guard used to be keyed

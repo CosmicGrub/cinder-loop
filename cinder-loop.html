@@ -1157,7 +1157,49 @@ var SFX = {
                 notes: [{ freq: 920, dur: 0.045 }] },
   blueprintUnlocked: { type: 'tone', wave: 'triangle', gain: 0.20,
                 notes: [{ freq: 440, dur: 0.07 }, { freq: 660, dur: 0.07, delay: 0.065 },
-                         { freq: 880, dur: 0.15, delay: 0.13 }] }
+                         { freq: 880, dur: 0.15, delay: 0.13 }] },
+  // 2026-09-06 audit: seven real, firing Bus events with zero presenter
+  // consumer of any kind — not even the deliberate "recorded, no visual
+  // yet" acknowledgment rollEnd/dashEnd already get. Six of the seven get
+  // a cue here (ledgeRelease is the one deliberately left visual-only, the
+  // least significant of the three ledge moments, matching crouch/
+  // uncrouch/wallTouch's own established "no dedicated sound" precedent).
+  //
+  // parryStart — the WINDOW ARMING, distinct from parry's own successful-
+  // negation clang. Quiet on purpose, the same "a shake here would punish
+  // the player for information they're supposed to be given calmly"
+  // reasoning telegraph's own cue already states — a subtle tell that the
+  // window is open, not a reward for landing it.
+  parryStart: { type: 'tone', wave: 'square', gain: 0.09,
+                notes: [{ freq: 700, dur: 0.03 }] },
+  // ledgeGrab / ledgeClimb — a real, physically-authored, extensively-
+  // tested mechanic that has shipped with zero audio or visual feedback
+  // since it landed (v0.2.12). A soft catch, then a short rising note for
+  // the climb up.
+  ledgeGrab:  { type: 'tone', wave: 'sine', gain: 0.15,
+                notes: [{ freq: 140, dur: 0.06 }] },
+  ledgeClimb: { type: 'tone', wave: 'triangle', gain: 0.15,
+                notes: [{ freq: 400, dur: 0.06 }, { freq: 560, dur: 0.08, delay: 0.05 }] },
+  // statGain — a modest ascending two-note chime, one step down from
+  // blueprintUnlocked's own three-note shape (a stat point is a smaller
+  // moment than unlocking a weapon). Deliberately payload-blind, matching
+  // this file's own stated rule (see TRIGGERS' header comment) that a
+  // sound never varies by WHO/WHERE/what-value — the "just became
+  // dominant" distinction is a presenter (particle) concern, not an
+  // audio one.
+  statGain:   { type: 'tone', wave: 'triangle', gain: 0.15,
+                notes: [{ freq: 500, dur: 0.06 }, { freq: 700, dur: 0.09, delay: 0.055 }] },
+  // blueprintDrop / blueprintLost — the other two-thirds of the same
+  // carried-resource lifecycle blueprintUnlocked already has a cue for;
+  // drop and loss were silent. Lost is blueprintUnlocked's own three-note
+  // shape played in reverse (a real fall, not just a different pitch) —
+  // the same "this is the SAME lifecycle, differently resolved" relationship
+  // the sound itself should carry.
+  blueprintDrop: { type: 'tone', wave: 'triangle', gain: 0.16,
+                notes: [{ freq: 380, dur: 0.08 }] },
+  blueprintLost: { type: 'tone', wave: 'triangle', gain: 0.18,
+                notes: [{ freq: 880, dur: 0.07 }, { freq: 660, dur: 0.07, delay: 0.065 },
+                         { freq: 440, dur: 0.15, delay: 0.13 }] }
 };
 var SFX_IDS = Object.keys(SFX).sort();
 
@@ -7194,6 +7236,71 @@ View.prototype.subscribe = function (bus) {
     self.particles.burst(e.x, e.y, 10, 1.6, 18, 'spark');
     self.camera.kick(2);
   }));
+
+  /* 2026-09-06 audit: seven real Bus events with zero presenter consumer —
+   * not even the deliberate "recorded, no visual yet" stub this file's
+   * own rollEnd/dashEnd/crouch/uncrouch/wallTouch already use for effects
+   * consciously deferred. blueprintLost is the one exception below that
+   * gets no particle burst here — its own payload (70-sim.js) carries no
+   * x/y, and death's own burst (above) already covers the same instant
+   * visually; its cue is audio-only (85-audio.js's TRIGGERS). */
+
+  // parryStart — the window ARMING, distinct from the 'parry' event above
+  // (a successful negation). A small, quiet puff at the player's own body,
+  // the same "commitment is visible, reward is louder" relationship
+  // telegraph/enemyAttack already have with hit/targetDown.
+  bus.on('parryStart', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H / 2, 4, 0.6, 14);
+  }));
+
+  // Ledge grab/climb/release: a real, physically-authored, extensively
+  // regression-tested mechanic (masterfile's own ledge-grab section) that
+  // shipped with NO feedback at all for any of its three moments.
+  bus.on('ledgeGrab', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H, 6, 1.0, 16);
+  }));
+  bus.on('ledgeClimb', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H, 8, 1.2, 18);
+  }));
+  bus.on('ledgeRelease', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H / 2, 3, 0.5, 12);
+  }));
+
+  // statGain — D2's own dominant-stat feedback, silent since D2 shipped.
+  // The payload carries no x/y (Player.prototype.gainStat has no world
+  // position to report, only stat state), so this looks the player's
+  // CURRENT body position up from the live sim the same way drawHud
+  // already reads player state directly — the one place in this function
+  // that reaches past its own event payload for a coordinate, and only
+  // because gainStat's own payload was never meant to carry one (30-
+  // player.js sits below the presenter boundary and rightly doesn't
+  // format render-facing data). A real, becoming-dominant gain reads
+  // bigger than a routine one — D19 (Dominance Breakpoints) is about to
+  // make that exact distinction mechanically load-bearing, not just
+  // cosmetic.
+  bus.on('statGain', fx(function (e) {
+    var pl = null;
+    for (var i = 0; i < self.sim.players.length; i++) {
+      if (self.sim.players[i].id === e.id) { pl = self.sim.players[i]; break; }
+    }
+    if (!pl) return;
+    var b = pl.body;
+    if (e.dominant) self.particles.burst(b.x + CFG.PLAYER_W / 2, b.y, 12, 1.6, 22, 'spark');
+    else self.particles.burst(b.x + CFG.PLAYER_W / 2, b.y, 5, 0.8, 16);
+  }));
+
+  // blueprintDrop — the drop half of blueprintUnlocked's own already-cued
+  // lifecycle; the OTHER half (unlock) has had a chime since it shipped,
+  // the drop moment itself never did. Real coordinates in the payload
+  // (the killed enemy's own position, 70-sim.js), unlike blueprintLost
+  // below.
+  bus.on('blueprintDrop', fx(function (e) {
+    self.particles.burst(e.x, e.y, 10, 1.4, 20, 'spark');
+  }));
+  // blueprintLost: audio-only (85-audio.js) — see this block's own header
+  // comment for why no particle burst is added here.
+  bus.on('blueprintLost', fx(function () {}));
+
   return this;
 };
 
@@ -7991,7 +8098,12 @@ var TRIGGERS = [
   // cue of its own, the same as rollEnd's own precedent (not in this list
   // either) — only the START of a committed burst reads as a real,
   // distinct moment worth a sound.
-  'dashStart', 'parry'
+  'dashStart', 'parry',
+  // 2026-09-06 audit: six real events that fired silently since each one's
+  // own feature shipped — see each SFX entry's own comment (10-data.js) for
+  // why. ledgeRelease is deliberately NOT here, matching crouch/uncrouch/
+  // wallTouch's own established "visual-only, no dedicated sound" shape.
+  'parryStart', 'ledgeGrab', 'ledgeClimb', 'statGain', 'blueprintDrop', 'blueprintLost'
 ];
 
 // Adversarially found (v0.2.16): the idempotency guard used to be keyed

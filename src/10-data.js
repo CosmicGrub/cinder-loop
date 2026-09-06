@@ -349,7 +349,49 @@ var SFX = {
                 notes: [{ freq: 920, dur: 0.045 }] },
   blueprintUnlocked: { type: 'tone', wave: 'triangle', gain: 0.20,
                 notes: [{ freq: 440, dur: 0.07 }, { freq: 660, dur: 0.07, delay: 0.065 },
-                         { freq: 880, dur: 0.15, delay: 0.13 }] }
+                         { freq: 880, dur: 0.15, delay: 0.13 }] },
+  // 2026-09-06 audit: seven real, firing Bus events with zero presenter
+  // consumer of any kind — not even the deliberate "recorded, no visual
+  // yet" acknowledgment rollEnd/dashEnd already get. Six of the seven get
+  // a cue here (ledgeRelease is the one deliberately left visual-only, the
+  // least significant of the three ledge moments, matching crouch/
+  // uncrouch/wallTouch's own established "no dedicated sound" precedent).
+  //
+  // parryStart — the WINDOW ARMING, distinct from parry's own successful-
+  // negation clang. Quiet on purpose, the same "a shake here would punish
+  // the player for information they're supposed to be given calmly"
+  // reasoning telegraph's own cue already states — a subtle tell that the
+  // window is open, not a reward for landing it.
+  parryStart: { type: 'tone', wave: 'square', gain: 0.09,
+                notes: [{ freq: 700, dur: 0.03 }] },
+  // ledgeGrab / ledgeClimb — a real, physically-authored, extensively-
+  // tested mechanic that has shipped with zero audio or visual feedback
+  // since it landed (v0.2.12). A soft catch, then a short rising note for
+  // the climb up.
+  ledgeGrab:  { type: 'tone', wave: 'sine', gain: 0.15,
+                notes: [{ freq: 140, dur: 0.06 }] },
+  ledgeClimb: { type: 'tone', wave: 'triangle', gain: 0.15,
+                notes: [{ freq: 400, dur: 0.06 }, { freq: 560, dur: 0.08, delay: 0.05 }] },
+  // statGain — a modest ascending two-note chime, one step down from
+  // blueprintUnlocked's own three-note shape (a stat point is a smaller
+  // moment than unlocking a weapon). Deliberately payload-blind, matching
+  // this file's own stated rule (see TRIGGERS' header comment) that a
+  // sound never varies by WHO/WHERE/what-value — the "just became
+  // dominant" distinction is a presenter (particle) concern, not an
+  // audio one.
+  statGain:   { type: 'tone', wave: 'triangle', gain: 0.15,
+                notes: [{ freq: 500, dur: 0.06 }, { freq: 700, dur: 0.09, delay: 0.055 }] },
+  // blueprintDrop / blueprintLost — the other two-thirds of the same
+  // carried-resource lifecycle blueprintUnlocked already has a cue for;
+  // drop and loss were silent. Lost is blueprintUnlocked's own three-note
+  // shape played in reverse (a real fall, not just a different pitch) —
+  // the same "this is the SAME lifecycle, differently resolved" relationship
+  // the sound itself should carry.
+  blueprintDrop: { type: 'tone', wave: 'triangle', gain: 0.16,
+                notes: [{ freq: 380, dur: 0.08 }] },
+  blueprintLost: { type: 'tone', wave: 'triangle', gain: 0.18,
+                notes: [{ freq: 880, dur: 0.07 }, { freq: 660, dur: 0.07, delay: 0.065 },
+                         { freq: 440, dur: 0.15, delay: 0.13 }] }
 };
 var SFX_IDS = Object.keys(SFX).sort();
 
