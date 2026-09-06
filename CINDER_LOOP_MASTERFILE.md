@@ -287,6 +287,8 @@ measurement of the code that is actually on disk.
 
 | D27 | `RunLogic.placeEnemies` (`60-run.js`) looped `DATA.ENEMY_IDS` unconditionally — every room of every run placed exactly one of each of the 4 regular templates, in the same order, forever. New `pickRoomComposition(rng, roomIndex)`: room 0 draws a random 2-3 template subset (a gentler opener), re-sorted back into `DATA.ENEMY_IDS`' own relative order (melee/charge/shoot/fly — a deliberate teaching progression, this file's own header comment already names it) rather than left in whatever order the random pick produced; the room right before the boss door (`roomIndex === CFG.ROOM_COUNT - 1`) draws all 4 templates plus 1-2 random repeats — a felt escalation. Every other room — and every existing call site passing no `roomIndex` at all — gets the exact pre-existing default, unmodified; `roomIndex` is a new, optional third parameter, threaded through from `Sim.prototype._enterRoom`'s own already-in-scope parameter (`70-sim.js:775`) with a one-line change at the call site. `placeEnemies` itself changes by one line (`var order = DATA.ENEMY_IDS;` → `var order = pickRoomComposition(rng, roomIndex);`), reusing the same `rng` instance already constructed from the caller's seed — no second RNG stream. | the single thinnest content axis in the game, confirmed with real numbers by the 2026-09-06 roadmap audit: a player has seen the entire regular roster by the end of room 0 of their very first run, and room 0 and the room right before the boss presented an identical threat level and composition. That same audit's own top recommendation, prioritized over every other finding it surfaced (including several real bugs) specifically because it is the one axis a player notices every room of every run, not once per level or once per run — the cheapest touch to the axis with the most-felt payoff. A pure-function change to an already-tested function, touching none of the three files the roadmap's own standing-risk paragraph names (`70-sim.js`'s core, `45-enemy.js`'s state machine, `40-combat.js`'s `Combat.resolveBox`) — a dedicated adversarial-verification pass was skipped in favor of thorough test coverage, the same reasoned call D21 made for a change this scoped |
 
+| D19 | Dominance Breakpoints — `dominantColour(stats)` (`30-player.js`), the general "strictly unique highest, a tie doesn't count" form of `gainStat`'s own pre-existing inline dominance check, extracted so `gainStat` and three new passives can all ask "what's dominant right now" without re-deriving the rule. Three flat, always-on modifiers, checked fresh at the moment of each effect, never snapshotted: ember dominant shortens Ember Dash's own cooldown (`endDash`, `CFG.DOMINANCE_DASH_CD_REDUCTION`, 30→22 frames), umbral dominant widens the Parry window itself at the moment of the press (`CFG.DOMINANCE_PARRY_WINDOW_BONUS`, 12→15 frames), verdant dominant shortens Roll's own cooldown (`endRoll`, `CFG.DOMINANCE_ROLL_CD_REDUCTION`, 24→18 frames). No new CFG dependency on `hash()` — dominance is fully derived from the already-hashed `stats` field. A multi-lens adversarial review (correctness, D13-enhancement interaction, co-op/state-lifecycle, test-coverage integrity, determinism) found the implementation itself clean across every lens; one real test-coverage gap it did catch (a "mid-run colour shift" test that mutated stats only after a roll had already ended, unable to actually distinguish "checked fresh at exit" from "cached at entry") was fixed before commit. | connects two systems (D2's three-colour stats, D13's abilities) that shipped independently and had never once referenced each other — `gainStat`'s own inline dominance check was already sitting there, generalized rather than reinvented. The 2026-09-06 roadmap audit named a real, worth-recording tension before this shipped: `pickStatColour` deliberately gives the *currently-dominant* colour the *least* weight of the three (an anti-death-spiral mechanic), the opposite of a system that now rewards *sustaining* dominance — resolved as an explicit design stance in the spec's own amendment (§9), not a code change: dominance is meant to be a fragile, contested state a player has to keep re-winning, not a stable build, consistent with checking it fresh rather than snapshotting it once |
+
 All remaining design answers take the ★ defaults recorded in the phased answer sheet.
 
 ---
@@ -1517,7 +1519,19 @@ guard against a stray file joining the build (reproduced directly — a
 leftover copy built and shipped with zero warning) or two files sharing a
 numeric prefix; fixing the first guard also caught a second, real,
 pre-existing gap — `56-caller.js` (D16) had never been added to
-`build.py`'s own `REQUIRED` list at all.
+`build.py`'s own `REQUIRED` list at all. **Since v0.2.25:** Dominance
+Breakpoints (D19) — three always-on passives (shorter Dash cooldown,
+wider Parry window, shorter Roll cooldown) fire whenever the matching
+D2 stat colour is currently the sole dominant one, generalizing
+`gainStat`'s own pre-existing inline dominance check into a reusable
+`dominantColour(stats)` both this feature and a future D20 (Grafts) can
+share. Passed a full multi-lens adversarial review clean; also closed
+three more cheap 2026-09-06 audit findings unrelated to any D-number:
+`85-audio.js` now asserts its trigger list is a real subset of the SFX
+table at load time, the test runner now fails fast on a too-old Node
+version instead of failing confusingly deep inside `cdp.js`, and the two
+independently hand-written comment-stripping regexes in `build.py` and
+`verify_arch.js` now cross-reference each other.
 
 **Designed, not built:** flask charges — the last of D8's four named
 meta-currency purchases still unbuilt (the backpack slot, deferred

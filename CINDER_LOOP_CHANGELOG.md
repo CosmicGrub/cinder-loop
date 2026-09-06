@@ -5,6 +5,89 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.25 — 2026-09-06 — Dominance Breakpoints (D19), plus three more cheap audit fixes
+
+**GREEN: 3354/3354 assertions across 18 suites** (`verify_stats` grew from
+41 to 82, `verify_move` from 226 to 239), `cinder-loop.html` at 474,519
+bytes. Two commits: the D19 feature itself, and three more small,
+independent fixes from the same 2026-09-06 roadmap audit that shipped
+alongside it without depending on it.
+
+**Dominance Breakpoints (D19).** D2's three-colour stat system
+(ember/umbral/verdant) and D13's abilities (Roll, Ember Dash, Parry)
+shipped independently across two separate features and had never once
+referenced each other, despite `Player.prototype.gainStat`
+(`30-player.js`) already computing "is this stat now the unique highest"
+inline, every time a pickup lands, purely to decide a max-HP bump. That
+same check, generalized, is the whole feature: a new `dominantColour(stats)`
+function (the "strictly unique highest, a tie doesn't count" rule,
+provably equivalent to `gainStat`'s own pre-refactor inline check for
+every real call) backs three flat, always-on passives, each checked fresh
+at the exact moment of its own effect, never snapshotted anywhere else —
+ember dominant shortens Ember Dash's own cooldown 30→22 frames
+(`endDash`, `CFG.DOMINANCE_DASH_CD_REDUCTION`), umbral dominant widens the
+Parry window itself 12→15 frames at the moment of the press, verdant
+dominant shortens Roll's own cooldown 24→18 frames (`endRoll`,
+`CFG.DOMINANCE_ROLL_CD_REDUCTION`). All three land at roughly the same
+~25-27% relative magnitude, a named design judgment, not a measurement.
+`hash()` needed no new field — dominance is fully derived from the
+already-hashed `stats`, so two identically-seeded runs already hash
+identically regardless. Exported as `C.dominantColour`, sibling to
+`C.pickStatColour`, for a future D20 (Grafts) to reuse without
+re-deriving the rule a third time.
+
+The approved spec (`docs/superpowers/specs/2026-09-06-dominance-
+breakpoints-design.md`) picked up one amendment before implementation: the
+2026-09-06 audit named a real tension between this feature and
+`pickStatColour`'s own deliberate anti-death-spiral bias (the currently-
+dominant colour gets the *least* weight of the three) — resolved as an
+explicit design stance recorded in the spec's own §9, not a code change:
+dominance is meant to be a fragile, contested state a player has to keep
+re-winning every pickup, not a stable build choice made once.
+
+A multi-lens adversarial review (correctness of the equivalence claim,
+interaction with the four existing D13 enhancement purchases, co-op/
+state-lifecycle correctness, test-coverage integrity, determinism) came
+back clean on every lens but one: a "mid-run colour shift" test mutated
+stats only *after* a roll had already fully ended, then triggered a
+brand-new second roll once dominance was already set — a real gap, since
+that sequence cannot distinguish "checked fresh at exit" from "cached
+once at entry," the exact property the test's own docstring claimed to
+prove. Fixed before commit: the corrected test mutates stats strictly
+*during* an in-flight roll and confirms that SAME roll's own ending
+cooldown reflects the change.
+
+**Three more cheap, independent audit fixes**, none touching D19: `85-
+audio.js` now asserts its hand-typed `TRIGGERS` list is a real subset of
+`DATA.SFX_IDS` at module load — a future typo now fails loudly instead of
+silently dropping a cue with no error anywhere, proven by a new
+`verify_audio.js` test that the guard actually fires against a corrupted
+`SFX_IDS`, not just that today's real data happens to pass it.
+`tests/run_all.sh` now fails fast with a clear message if Node is older
+than v22, the real floor `tests/cdp.js`'s zero-npm-dependency design has
+always silently assumed for its global `WebSocket`. `build.py`'s
+`strip_comments()` and `verify_arch.js`'s own `code()` helper — two
+independently hand-written comment-stripping regexes in two languages,
+never cross-checked — each gained a comment pointing at the other.
+
+Also, three items from the same audit's §2 (roadmap corrections) closed
+in the roadmap pitch document itself: a named "invisible-but-gameplay-
+affecting state" pattern (D19's own dominance joins D15's weapon choice
+as a second piece of state silently changing combat math with no
+on-screen signal), and a sharpened warning — citing D17's own near-miss,
+which shipped from a summary this short and missed an entire physics
+dependency — that D18/D20/D22/D23's one-paragraph pitch summaries are a
+starting point for that system's own brainstorming pass, not a
+substitute for it.
+
+**Deliberately not attempted:** the module-renumbering headroom fix
+(§5.32, `56-caller.js`→`58-caller.js`/`95-app.js`→`98-app.js`) touches
+roughly thirty files with prose citations of those filenames, not just
+structural requirements — real risk of leaving a stale comment behind
+for a fix that isn't urgent until D18 actually wants the 55/56 gap.
+
+---
+
 ## v0.2.24 — 2026-09-06 — Roadmap audit response: a build.py bug, spec hygiene, seven silent Bus events wired, per-room enemy composition (D27)
 
 **GREEN: 3298/3298 assertions across 18 suites** (a new `verify_build`
