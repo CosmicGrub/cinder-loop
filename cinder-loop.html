@@ -420,7 +420,7 @@ var CFG = {
    * whole mechanic observable at all before any content is added to
    * eventually gate behind it. */
   META_BLUEPRINT_DROP_CHANCE: 0.15,
-  META_BLUEPRINT_CAPACITY: 1,     // per player; a "backpack slot" purchase would raise this later — deferred
+  META_BLUEPRINT_CAPACITY: 1,     // per player, the base; the D24 backpack slot (below) adds +1 — see 70-sim.js's _blueprintCapacity
   META_BLUEPRINT_UNLOCK_COST: 15,
   META_MAXHP_COST: 25,
   META_MAXHP_GAIN: 1,             // matches STAT_HP_GAIN — the permanent version of the same concept
@@ -1653,8 +1653,8 @@ Player.prototype.resetTransient = function () {
   // all. D2's own stat pickups are unrelated — they're real and collectible
   // now, they just never touch this field.
   this.weapon = 'blade';
-  // D4/65-meta.js: a carried, not-yet-handed-in blueprint (a weapon id, or
-  // null). Owned by 70-sim.js, which sits above this file and may write it
+  // D4/65-meta.js: carried, not-yet-handed-in blueprints (weapon ids; see
+  // the D24 note below). Owned by 70-sim.js, which sits above this file and may write it
   // on a real kill's blueprint-drop roll — the player only ever carries it.
   // Reset HERE, on the same "one run boundary" resetTransient() already is,
   // is what makes "lost on death" true for free: a death already calls this
@@ -1729,7 +1729,7 @@ Player.prototype.teleport = function (x, y) {
   this.parryWindow = 0; this.parryCd = 0;
   // dashExtraCharge/dashExtIframes/parryRiposte/parryReflect are
   // deliberately NOT reset here — the same "a live transition is not a
-  // death" reasoning carriedBlueprint's own comment already states.
+  // death" reasoning carriedBlueprints' own comment already states.
   // Ownership survives; dashCharges (the momentary RESOURCE, above) still
   // clears, refilling naturally on the next ground contact.
   this.cutArmed = false;
@@ -6496,11 +6496,11 @@ Sim.prototype._commitPendingLevel = function () {
   // precedent _relocatePlayers() already set for not force-touching a
   // player who is not done dying yet — their own natural respawn already
   // calls resetTransient() on their own schedule, so nothing here needs to
-  // race it. resetTransient() ALSO clears carriedBlueprint, redundantly —
+  // race it. resetTransient() ALSO clears carriedBlueprints, redundantly —
   // _handInCarriedBlueprints() above already self-clears it (a real
   // requirement once a checkpoint's own mid-level call site has no reset
   // sweep of its own to piggyback on; see that method's header) — so this
-  // is a harmless no-op re-clear of an already-null field here, not the
+  // is a harmless no-op re-clear of an already-empty array here, not the
   // only place it happens the way an older draft of this comment claimed.
   for (var i = 0; i < this.players.length; i++) {
     if (this.players[i].alive()) {
@@ -6520,13 +6520,13 @@ Sim.prototype._commitPendingLevel = function () {
 };
 
 // Extracted so the checkpoint path (_onRoomClear(), below) can hand in a
-// carried blueprint at EVERY room clear, not only at a true run-end — D4's
+// carried blueprints at EVERY room clear, not only at a true run-end — D4's
 // own "at a transition" language, and a checkpoint genuinely is one (spec
 // §7d). SELF-CONTAINED: clears carrier.carriedBlueprint itself (rather
 // than relying on a caller's own later resetTransient() sweep the way the
 // original inline loop implicitly did) — the run-end call site still has
 // that sweep right after this returns (a harmless re-clear of an already-
-// null field, see its own comment), but the checkpoint call site has NO
+// empty array, see its own comment), but the checkpoint call site has NO
 // such sweep (a room transition uses teleport(), which deliberately
 // preserves carriedBlueprint — "a live transition is not a death"), so
 // this method must be correct on its own at both call sites, not correct
@@ -6538,8 +6538,8 @@ Sim.prototype._handInCarriedBlueprints = function () {
     if (!carrier.alive()) continue;
     // D24: every item carried, in acquisition (array) order — so a player
     // carrying two different locked blueprints and short on currency for
-    // both opportunistically unlocks whichever they found FIRST. Not a
-    // rule designed around; the natural consequence of FIFO push order.
+    // both opportunistically unlocks whichever they found FIRST. FIFO holds
+    // PER CARRIER only: across players, spend priority is player index.
     for (var ci = 0; ci < carrier.carriedBlueprints.length; ci++) {
       var weaponId = carrier.carriedBlueprints[ci];
       // Recorded HERE, before either branch below — every carry consumed at
@@ -9626,7 +9626,10 @@ function boot(canvas, hud, seed) {
     if (e.code === 'F8') { if (sim.buyDashExtIframes()) saveMeta(sim.meta); }
     if (e.code === 'F9') { if (sim.buyParryRiposte()) saveMeta(sim.meta); }
     if (e.code === 'F10') { if (sim.buyParryReflect()) saveMeta(sim.meta); }
-    if (e.code === 'F12') { if (sim.buyBackpackSlot()) saveMeta(sim.meta); }   // D24
+    // D24. preventDefault matters here specifically: F12 is the one debug key
+    // whose browser default (open DevTools) would otherwise fire too and
+    // steal keyboard focus from the game — adversarially found.
+    if (e.code === 'F12') { e.preventDefault(); if (sim.buyBackpackSlot()) saveMeta(sim.meta); }
     // D16 (summon-primitive spec §6): debug-only Caller spawn, a fixed
     // distance in front of player 0 — the same direct sim.addEnemy() call
     // the boot-path Dummy already makes via sim.addTarget() above,

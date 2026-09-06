@@ -345,7 +345,7 @@ var CFG = {
    * whole mechanic observable at all before any content is added to
    * eventually gate behind it. */
   META_BLUEPRINT_DROP_CHANCE: 0.15,
-  META_BLUEPRINT_CAPACITY: 1,     // per player; a "backpack slot" purchase would raise this later — deferred
+  META_BLUEPRINT_CAPACITY: 1,     // per player, the base; the D24 backpack slot (below) adds +1 — see 70-sim.js's _blueprintCapacity
   META_BLUEPRINT_UNLOCK_COST: 15,
   META_MAXHP_COST: 25,
   META_MAXHP_GAIN: 1,             // matches STAT_HP_GAIN — the permanent version of the same concept

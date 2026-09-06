@@ -1032,11 +1032,11 @@ Sim.prototype._commitPendingLevel = function () {
   // precedent _relocatePlayers() already set for not force-touching a
   // player who is not done dying yet — their own natural respawn already
   // calls resetTransient() on their own schedule, so nothing here needs to
-  // race it. resetTransient() ALSO clears carriedBlueprint, redundantly —
+  // race it. resetTransient() ALSO clears carriedBlueprints, redundantly —
   // _handInCarriedBlueprints() above already self-clears it (a real
   // requirement once a checkpoint's own mid-level call site has no reset
   // sweep of its own to piggyback on; see that method's header) — so this
-  // is a harmless no-op re-clear of an already-null field here, not the
+  // is a harmless no-op re-clear of an already-empty array here, not the
   // only place it happens the way an older draft of this comment claimed.
   for (var i = 0; i < this.players.length; i++) {
     if (this.players[i].alive()) {
@@ -1056,13 +1056,13 @@ Sim.prototype._commitPendingLevel = function () {
 };
 
 // Extracted so the checkpoint path (_onRoomClear(), below) can hand in a
-// carried blueprint at EVERY room clear, not only at a true run-end — D4's
+// carried blueprints at EVERY room clear, not only at a true run-end — D4's
 // own "at a transition" language, and a checkpoint genuinely is one (spec
 // §7d). SELF-CONTAINED: clears carrier.carriedBlueprint itself (rather
 // than relying on a caller's own later resetTransient() sweep the way the
 // original inline loop implicitly did) — the run-end call site still has
 // that sweep right after this returns (a harmless re-clear of an already-
-// null field, see its own comment), but the checkpoint call site has NO
+// empty array, see its own comment), but the checkpoint call site has NO
 // such sweep (a room transition uses teleport(), which deliberately
 // preserves carriedBlueprint — "a live transition is not a death"), so
 // this method must be correct on its own at both call sites, not correct
@@ -1074,8 +1074,8 @@ Sim.prototype._handInCarriedBlueprints = function () {
     if (!carrier.alive()) continue;
     // D24: every item carried, in acquisition (array) order — so a player
     // carrying two different locked blueprints and short on currency for
-    // both opportunistically unlocks whichever they found FIRST. Not a
-    // rule designed around; the natural consequence of FIFO push order.
+    // both opportunistically unlocks whichever they found FIRST. FIFO holds
+    // PER CARRIER only: across players, spend priority is player index.
     for (var ci = 0; ci < carrier.carriedBlueprints.length; ci++) {
       var weaponId = carrier.carriedBlueprints[ci];
       // Recorded HERE, before either branch below — every carry consumed at

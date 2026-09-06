@@ -194,8 +194,8 @@ Player.prototype.resetTransient = function () {
   // all. D2's own stat pickups are unrelated — they're real and collectible
   // now, they just never touch this field.
   this.weapon = 'blade';
-  // D4/65-meta.js: a carried, not-yet-handed-in blueprint (a weapon id, or
-  // null). Owned by 70-sim.js, which sits above this file and may write it
+  // D4/65-meta.js: carried, not-yet-handed-in blueprints (weapon ids; see
+  // the D24 note below). Owned by 70-sim.js, which sits above this file and may write it
   // on a real kill's blueprint-drop roll — the player only ever carries it.
   // Reset HERE, on the same "one run boundary" resetTransient() already is,
   // is what makes "lost on death" true for free: a death already calls this
@@ -270,7 +270,7 @@ Player.prototype.teleport = function (x, y) {
   this.parryWindow = 0; this.parryCd = 0;
   // dashExtraCharge/dashExtIframes/parryRiposte/parryReflect are
   // deliberately NOT reset here — the same "a live transition is not a
-  // death" reasoning carriedBlueprint's own comment already states.
+  // death" reasoning carriedBlueprints' own comment already states.
   // Ownership survives; dashCharges (the momentary RESOURCE, above) still
   // clears, refilling naturally on the next ground contact.
   this.cutArmed = false;

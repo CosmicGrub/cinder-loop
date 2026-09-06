@@ -212,13 +212,14 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     JSON.stringify(MetaLogic.spendOnUnlock(100)),
     JSON.stringify(RunLogic.spend(100, CFG.META_BLUEPRINT_UNLOCK_COST)));
 
-  // Abilities spec §4's four enhancements — same reuse of RunLogic.spend,
-  // same affordable/unaffordable pair per spend.
+  // Abilities spec §4's four enhancements, plus D24's backpack slot — same
+  // reuse of RunLogic.spend, same affordable/unaffordable pair per spend.
   const spends = [
     ['spendOnDashExtraCharge', CFG.META_DASH_EXTRA_CHARGE_COST],
     ['spendOnDashExtIframes', CFG.META_DASH_EXT_IFRAMES_COST],
     ['spendOnParryRiposte', CFG.META_PARRY_RIPOSTE_COST],
-    ['spendOnParryReflect', CFG.META_PARRY_REFLECT_COST]
+    ['spendOnParryReflect', CFG.META_PARRY_REFLECT_COST],
+    ['spendOnBackpackSlot', CFG.META_BACKPACK_SLOT_COST]   // D24
   ];
   for (const [fn, cost] of spends) {
     const afford = MetaLogic[fn](cost);
@@ -879,7 +880,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   // death as one of exactly two ways a run ends), not two sequential steps
   // of the same outcome. A player whose OWN death is what ends the run
   // never reaches a transition ALIVE — resetTransient() (their own natural
-  // respawn) already clears carriedBlueprint before _commitPendingLevel()
+  // respawn) already clears carriedBlueprints before _commitPendingLevel()
   // ever runs, the same tick. "Hand in" is therefore only reachable via
   // the OTHER ending: surviving to a boss victory with no death (solo) or
   // being the co-op partner who lives (tested separately below).
@@ -1105,8 +1106,14 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   s.eq('spending exactly META_BACKPACK_SLOT_COST', a.sim.meta.currency, 7);
   s.eq('and flipping the flag', a.sim.meta.backpackSlot, true);
 
+  // Adversarially found: the first draft ran this second buy with currency
+  // 7 (< the cost), so RunLogic.spend's affordability check refused it and
+  // the double-purchase guard itself was never what this exercised —
+  // deleting the guard left the suite green. Re-armed with currency to
+  // spare, so the guard is the only thing that can refuse it.
+  a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST + 3;
   s.eq('a second buy is refused outright — a one-time flag, not stackable', a.sim.buyBackpackSlot(), false);
-  s.eq('and charges nothing for the refusal', a.sim.meta.currency, 7);
+  s.eq('and charges nothing for the refusal, even with currency to spare', a.sim.meta.currency, CFG.META_BACKPACK_SLOT_COST + 3);
 }
 
 {
@@ -1115,14 +1122,14 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   // brute-force-a-real-seed shape the capacity-1 test above uses. Bought
   // MID-RUN on purpose — the no-live-top-up claim is that the next drop
   // sees the new capacity immediately, not only after a reset.
-  let found = null;
+  let found = null, boughtAll = true;
   for (let seed = 0; seed < 120 && !found; seed++) {
     const a = H.scenario({ seed });
     a.settle();
     a.sim.beginRun(seed);
     a.sim.meta.enforceLocks = true;
     a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST;
-    s.ok('bought mid-run (seed ' + seed + ')', a.sim.buyBackpackSlot()) || null;
+    if (!a.sim.buyBackpackSlot()) boughtAll = false;
     for (const t of a.sim.targets) a.realKill(t);
     for (let i = 0; i < 12 && a.p().carriedBlueprints.length < 2; i++) {
       const d = a.sim.addTarget(new C.Combat.Dummy(500 + i, a.b().x, a.b().y, 10));
@@ -1132,8 +1139,10 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
     if (a.p().carriedBlueprints.length === 2) found = a;
   }
   s.ok('with the slot owned, a real second drop lands on a player already carrying one', !!found);
+  s.ok('and every mid-run buy along the way succeeded (currency == cost, flag unset)', boughtAll);
   if (found) {
-    s.eq('never a third — capacity is exactly 2', found.p().carriedBlueprints.length, 2);
+    // (a "never a third" check right here would be tautological — the search
+    // above stops the instant length hits 2; the kills below are the real test)
     for (let i = 0; i < 10; i++) {
       const d = found.sim.addTarget(new C.Combat.Dummy(700 + i, found.b().x, found.b().y, 10));
       found.sim._levelRosterIds.push(d.id);
@@ -1231,6 +1240,7 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   while (a.p().state === 'dead' && n < CFG.RESPAWN_FRAMES + 5) { a.step(1); n++; }
   s.eq('both gone once the natural respawn fires', a.p().carriedBlueprints.length, 0);
   s.eq('neither was unlocked', a.sim.meta.unlocked.thornspear, undefined);
+  s.eq('nor the other', a.sim.meta.unlocked.daggers, undefined);
 }
 
 {
@@ -1242,6 +1252,15 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   const ab = H.scenario(); ab.settle(); ab.sim.beginRun(40);
   ab.p().carriedBlueprints = ['daggers', 'warmaul'];
   s.ok('a two-item carry changes the hash', base.sim.hash() !== ab.sim.hash());
+  // The separator is load-bearing, not decorative: a bare concatenation
+  // (join('') instead of join(',')) would hash these two genuinely different
+  // carries identically. Non-weapon strings on purpose — hash() joins
+  // whatever is there, and no real pair of the four ids collides this way.
+  const sepA = H.scenario(); sepA.settle(); sepA.sim.beginRun(40);
+  sepA.p().carriedBlueprints = ['ab', 'c'];
+  const sepB = H.scenario(); sepB.settle(); sepB.sim.beginRun(40);
+  sepB.p().carriedBlueprints = ['a', 'bc'];
+  s.ok('the separator is real — ["ab","c"] and ["a","bc"] hash differently', sepA.sim.hash() !== sepB.sim.hash());
   const ba = H.scenario(); ba.settle(); ba.sim.beginRun(40);
   ba.p().carriedBlueprints = ['warmaul', 'daggers'];
   s.ok('the same two items in the other order hash differently — order is state', ab.sim.hash() !== ba.sim.hash());
@@ -1317,6 +1336,54 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   }
   s.eq('identical seed -> byte-identical hash across a full clear/boss/meta loop',
     run(50), run(50));
+}
+
+{
+  // Adversarially found gap: spec §9's last bullet (determinism with the
+  // slot owned) was never implemented, and no test carried two REAL drops
+  // (the kill-roster listener, real blueprintDrop events, real RNG draws)
+  // through a REAL checkpoint — every two-item hand-in above injects
+  // literals. This drives the whole path end to end, then replays it and
+  // hashes both, then re-drives it with the slot NOT owned to prove the
+  // flag is what raises the ceiling (a capacity that ignored the flag and
+  // always returned 2 was caught by nothing in this section before this).
+  function driveTwoDrops(seed, buy) {
+    const a = H.scenario({ seed });
+    a.settle();
+    a.sim.beginRun(seed);
+    a.sim.meta.enforceLocks = true;
+    a.sim.meta.currency = 10000;
+    if (buy) a.sim.buyBackpackSlot();
+    for (const t of a.sim.targets.slice()) a.realKill(t);
+    for (let i = 0; i < 40 && a.p().carriedBlueprints.length < 2; i++) {
+      const d = a.sim.addTarget(new C.Combat.Dummy(900 + i, a.b().x, a.b().y, 10));
+      a.sim._levelRosterIds.push(d.id);
+      a.realKill(d);
+    }
+    return a;
+  }
+  let seed2 = -1;
+  for (let seed = 0; seed < 120 && seed2 < 0; seed++) {
+    if (driveTwoDrops(seed, true).p().carriedBlueprints.length === 2) seed2 = seed;
+  }
+  s.ok('found a seed where two REAL drops land with the slot owned', seed2 >= 0, 'seed ' + seed2);
+  if (seed2 >= 0) {
+    const a = driveTwoDrops(seed2, true);
+    const carried = a.p().carriedBlueprints.slice();
+    s.eq('two real drops carried, two blueprintDrop events', a.count('blueprintDrop'), 2);
+    a.step(1);   // the roster is clear: a REAL checkpoint fires here and hands both in
+    s.ok('a real checkpoint fired and emptied the carry', a.count('checkpoint') > 0 && a.p().carriedBlueprints.length === 0,
+      'checkpoints ' + a.count('checkpoint') + ', carried ' + a.p().carriedBlueprints.length);
+    s.eq('every carried id ended up unlocked', carried.every((id) => a.sim.meta.unlocked[id] === true), true);
+    const distinct = carried[0] !== carried[1];
+    s.eq('currency spent once per DISTINCT id (a duplicate roll is a no-op, never a double charge)',
+      a.sim.meta.currency, 10000 - CFG.META_BACKPACK_SLOT_COST - (distinct ? 2 : 1) * CFG.META_BLUEPRINT_UNLOCK_COST);
+    const b = driveTwoDrops(seed2, true);
+    b.step(1);
+    s.eq('the same seed replays byte-identical through two real drops and a real hand-in (L4)', a.sim.hash(), b.sim.hash());
+    const c = driveTwoDrops(seed2, false);
+    s.eq('the identical drive WITHOUT the slot never carries a second — the flag is the ceiling', c.p().carriedBlueprints.length, 1);
+  }
 }
 
 process.exit(s.done());
