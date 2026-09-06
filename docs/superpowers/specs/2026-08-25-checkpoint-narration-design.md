@@ -1,6 +1,7 @@
 # Checkpoint narration (D21)
 
-Status: design approved by user 2026-08-25. Not yet implemented.
+Status: design approved by user 2026-08-25. Implemented as v0.2.21
+(`4769f66`).
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (the
 pitch this spec formalizes, ranked #1 of the revised Tier 1 build order).

@@ -1,6 +1,10 @@
 # The "summon" primitive — elite Caller (D16)
 
-Status: design approved by user 2026-08-24. Not yet implemented.
+Status: design approved by user 2026-08-24. Implemented as v0.2.20
+(`d8e3bce`), adversarially reviewed (5 real bugs found and fixed).
+Note (2026-09-06 audit): this spec's own §3/§4 are now stale in two
+places the adversarial pass corrected but this file was never
+amended for — see the "terrain-blind spawn" note added to §3 below.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (the
 pitch this spec formalizes, ranked #2 of the post-D13 roadmap, right
@@ -98,11 +102,26 @@ Enemy.prototype.callIn = function (ctx) {
 };
 ```
 
-No terrain-probing needed for the spawned add's placement: `Enemy`'s own
-constructor starts `b.onGround = false`
+**Amended (2026-09-06 audit, mirroring D17's own §1a self-correction
+pattern) — the claim just below this paragraph was wrong, and the
+adversarial pass that shipped with this feature already fixed the code;
+this spec itself was simply never updated to say so.** The original claim
+read: "No terrain-probing needed for the spawned add's placement:
+`Enemy`'s own constructor starts `b.onGround = false`
 (`45-enemy.js`'s `resetTransient`), and gravity/`b.move(world)` resolves
 it every tick exactly like every other enemy's own natural fall onto the
-floor. `this.summonsUsed` is a new field on `Enemy`, reset in
+floor." This is false whenever the offset spawn point lands INSIDE a
+multi-row-solid mass — real generated rooms really do have such walls,
+and gravity alone cannot resolve a body that spawns already embedded in
+one; it climbs upward through solid rock instead of falling clear. Found
+by the D16 adversarial pass as one of 5 real production bugs (see
+`CINDER_LOOP_CHANGELOG.md`'s v0.2.20 entry) and fixed in the shipped code
+(`45-enemy.js:452-473`'s real `callIn()`) with a real terrain check:
+`if (ctx.rectSolid && ctx.rectSolid(spawnX, spawnY, sw, sh)) { spawnX =
+b.x; spawnY = b.y; }` — falling back to the Caller's own position if the
+offset spot is occupied, rather than trusting the offset blindly. See §4's
+own amendment for the matching `ctx.rectSolid` integration point this
+fix needed. `this.summonsUsed` is a new field on `Enemy`, reset in
 `resetTransient()` alongside every other per-life field, enforcing a
 **lifetime** cap across the whole encounter (not per-cast) — a dead
 Caller cannot summon again; a living one that's used up `summonMax` calls
@@ -123,7 +142,7 @@ the shared `doRecover()` (`45-enemy.js:539-552`,
 `this.cooldown = this.phaseCooldown(m.cooldown)`) — so a second, parallel
 field would only duplicate it for no reason.
 
-## 4. `ctx.addEnemy` — the one true new integration point
+## 4. `ctx.addEnemy` (and, corrected below, `ctx.rectSolid`) — the new integration points
 
 `Sim`'s `this.ctx` object (`70-sim.js:80-83`) currently exposes `rig` and
 `addShot` to every `Enemy.prototype.update(world, players, bus, ctx)`
@@ -145,6 +164,19 @@ same way the boot-path practice Dummy is already added via
 `sim.addTarget(...)` directly rather than through any Enemy-facing bridge
 — two genuinely different call sites for the same already-real method,
 not two implementations of the same thing.
+
+**Amended (2026-09-06 audit) — this section's own title originally
+claimed "the ONE true new integration point," which the shipped code
+already contradicts.** A SECOND field, `ctx.rectSolid`, was added to the
+real `this.ctx` object (`70-sim.js:88`, its own comment: "Adversarially
+found (D16): `callIn()` needs to check a spawn point against real terrain
+before placing an enemy there") specifically to support §3's own
+terrain-blind-spawn fix. This spec's original §3/§4 split assumed exactly
+one new channel would ever be needed; the real fix needed two. Worth
+naming explicitly for D20 (Grafts), which the roadmap sequences to reuse
+this feature's own patterns — a future spec relying on this file for "how
+does an off-body Enemy-side placement work in this engine" should expect
+a terrain check to be part of that pattern, not an optional extra.
 
 ## 5. Room-clear and currency — reuses the existing exclusion mechanism
 

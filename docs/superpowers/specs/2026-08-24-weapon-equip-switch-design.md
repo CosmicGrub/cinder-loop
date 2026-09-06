@@ -1,6 +1,9 @@
 # Weapon equip & switch (D15)
 
-Status: design approved by user 2026-08-24. Not yet implemented.
+Status: design approved by user 2026-08-24. Implemented as v0.2.19
+(`333f5b7`), adversarially reviewed (3 real bugs found and fixed,
+including a missing `meta.lastWeapon` save hook — see the note added
+to §3 below).
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (the
 pitch this spec formalizes, ranked #1 of the post-D13 roadmap).
@@ -104,6 +107,24 @@ affected player. No separate per-player memory is built for v1.
 
 `Meta`'s default `lastWeapon` is `'blade'` — matching the existing
 default, safe from tick one, requiring no migration.
+
+**Amended (2026-09-06 audit) — this section fully specifies WHEN
+`meta.lastWeapon` updates in memory, but never once names WHETHER
+anything saves it to disk, and that gap became this feature's own
+adversarial-pass bug #1.** `meta.lastWeapon` had no matching save hook —
+switching weapons mutated it correctly in memory, but nothing called
+`saveMeta()` for that specific mutation, so the choice was silently lost
+on an ordinary reload unless some LATER, unrelated save happened to fire
+first. Fixed the same way F5/F6's own already-named save gap was: a
+`weaponSwitch` → `saveMeta` listener wired in `95-app.js`, gated to
+player 0's own switch (see `CINDER_LOOP_CHANGELOG.md`'s v0.2.19 entry).
+The general lesson is now a stated checklist item in the roadmap pitch
+doc for D20/D23/D24 ("any new permanent meta-mutation needs an explicit
+save-hook audit... during design, not discovered adversarially") — worth
+recording here too, since this is the spec where the gap actually
+originated: **every new permanent `meta` field's own persistence section
+should name its save trigger explicitly, alongside when it updates in
+memory, not just the latter.**
 
 ## 4. Input — a real, permanent, player-facing trigger from day one
 

@@ -28,7 +28,14 @@
  * thing rather than trusting this comment (L8).
  * ------------------------------------------------------------------ */
 var CFG = {
-  TICK_HZ: 60,
+  // L3: the one fixed sim tick rate, NEVER scaled. Deliberately a single
+  // literal, not derived from a separate TICK_HZ constant — an earlier
+  // version had both, but TICK_HZ had zero real consumer anywhere (the
+  // real accumulator loop, 95-app.js, already read DT directly) and
+  // existed only as a second, unlinked place a future edit could update
+  // without the other noticing. Found in the 2026-09-06 roadmap audit;
+  // removed rather than wired, since DT's own value is the actual
+  // invariant this locks, not a frequency to convert from.
   DT: 1 / 60,
   TILE: 16,
 

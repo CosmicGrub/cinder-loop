@@ -1,6 +1,15 @@
 # Roll-crossable hazard beats (D17)
 
-Status: design approved by user 2026-08-25. Not yet implemented.
+Status: design approved by user 2026-08-25. Implemented as v0.2.22
+(`ff795fb` + two follow-up fix commits, `c87ebdc`/`844c046`),
+adversarially reviewed (5 real bugs found and fixed, plus a real
+cross-feature interaction with D14's checkpoint alcove). Note
+(2026-09-06 audit): this file's own §1a is a complete record of the
+physics-prerequisite correction found BEFORE implementation, but does
+not itself list the 5 bugs the adversarial pass found DURING/AFTER —
+see `CINDER_LOOP_CHANGELOG.md`'s own v0.2.22 entry for that full list;
+this project's convention is that pre-implementation corrections get
+folded into the spec, post-implementation ones live in the changelog.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (Gen
 Pitch 1, the pitch this spec formalizes).
