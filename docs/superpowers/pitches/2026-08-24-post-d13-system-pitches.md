@@ -71,6 +71,17 @@ owns D12. Not ranked; stays parked until that decision is made on purpose.
 
 ## Recommended build order
 
+**Superseded note (2026-09-06 audit):** this table's own `Size/Risk`
+column, for anything past D16, is now a materially lighter read than the
+"Revised build order... tier / priority / risk" section further down —
+e.g. D20 is "Medium" here but "the largest net-new engine surface of the
+original core nine" there, sequenced last in its tier specifically
+because of that heavier assessment. The two sections were never
+cross-referenced when the second was written. **For D17 onward, the
+revised Tier list below is the authoritative risk read; this table's own
+Size/Risk column for those rows should be treated as historical, not
+current.**
+
 | # | System | Extends | Size/Risk | Why here |
 |---|---|---|---|---|
 | **D15** | **Weapon equip & switch** — `player.weapon` goes live (gated on `!player.attack`); `meta.startWeapon` adds a free starting-loadout choice once unlocked | D9, D2, D4, D8 | Small — under 40 lines, every touch point mirrors an existing pattern | Closes the single largest already-built-but-inert surface in the game: D9's 4-weapon roster and D2's colour-scaling axis have been dead code from a player's view since v0.2.8 |
@@ -125,20 +136,36 @@ D17 on using three axes together, not the single linear list above:
 - **Risk** — informed by what actually broke during D14–D16, not the
   original pitches' own pre-implementation guesses.
 
-**The one standing risk category every tier below is read against:**
-every feature that has touched `70-sim.js`'s core (`step()`/`hash()`/the
-`ctx` bridge) or `45-enemy.js`'s state machine has produced a real,
-adversarially-found bug on its first pass — D14's alcove-reachability bug
-(found in TWO rounds, the second only by re-testing the first fix), D15's
-three production bugs (a missing save hook, a missing validation guard, a
-missing `alive()` guard). This is not a per-feature coincidence; treat
-touching either file as inherently Tier-2-or-higher regardless of how
-small the mechanic looks on paper, and budget a real adversarial pass for
-it, not a lighter one. Separately: any new **permanent** meta-mutation
-needs an explicit "is there a save hook for every path that touches it"
-check *during design*, not discovered adversarially after the fact — D15's
-bug #1 is now a checklist item, not a surprise, for D20/D23/D24 below,
-all three of which touch permanent `meta` state.
+**The one standing risk category every tier below is read against —
+generalized 2026-09-06, the original two-file version below is now
+falsified by its own later evidence:** every feature that has touched
+`70-sim.js`'s core (`step()`/`hash()`/the `ctx` bridge) or `45-enemy.js`'s
+state machine has produced a real, adversarially-found bug on its first
+pass — D14's alcove-reachability bug (found in TWO rounds, the second
+only by re-testing the first fix), D15's three production bugs (a missing
+save hook, a missing validation guard, a missing `alive()` guard), D16's
+five (a terrain-blind spawn offset among them). **D17 broke the pattern
+in a way that only strengthens the underlying rule: it touched NEITHER
+named file** (only `50-gen.js` and a new physics primitive in
+`25-body.js`) and still produced 5 real bugs, including a genuine
+cross-feature interaction with D14's own checkpoint alcove. The rule
+generalizes past "these two specific files" to the pattern the project's
+actual history now supports: **any feature introducing a genuinely new
+state-machine branch, a new physics/collision primitive, or a new
+interaction with already-shipped room/checkpoint/hazard geometry gets a
+full adversarial pass, regardless of which file it lands in.** D18 (a new
+`guardHp` pool) and D22 (new room-kind branching touching the same D14
+geometry D17 already found a real bug interacting with) both qualify
+under this broader, truer version even though neither touches the two
+originally-named files — as does D20, whose own primary touch point,
+`40-combat.js`'s `Combat.resolveBox`, has an equally dense D13-era bug
+history (a parry/`invulnerable()` ordering bug, a co-op double-Riposte-
+damage bug, a stale-`alive()` Reflect bug) this paragraph never
+previously named. Separately: any new **permanent** meta-mutation needs
+an explicit "is there a save hook for every path that touches it" check
+*during design*, not discovered adversarially after the fact — D15's bug
+#1 is now a checklist item, not a surprise, for D20/D23/D24 below, all
+three of which touch permanent `meta` state.
 
 ### Tier 1 — build next: minimal footprint, low risk, no blocking dependency
 
@@ -174,41 +201,84 @@ already write itself:
    (`Enemy.prototype.hurt`) — but that function is the single chokepoint
    *every hit landing on any enemy in the game* already routes through.
    Small mechanic, high-traffic surface; budget the review accordingly.
-3. **Finish D14's cinder economy.** Named honestly in D14's own doc-sync:
-   the room/checkpoint machinery and the tube's physical geometry shipped;
-   the drop/carry/bank mechanic itself did not. This is NOT a small
-   follow-up — the original room-checkpoint spec's own §4 called the
-   interact button "the single largest net-new mechanism in the feature"
-   (no existing interactable-tile precedent anywhere in the engine,
-   genuinely new `Pad`/settings/keybind work), comparable in real scope to
-   D15's own `switchWeapon` input work, not a quick add-on. Re-classified
-   up from an earlier, too-optimistic Tier-1 read for exactly this reason.
+3. **D25 — Finish D14's cinder economy.** Named honestly in D14's own
+   doc-sync: the room/checkpoint machinery and the tube's physical
+   geometry shipped; the drop/carry/bank mechanic itself did not. This is
+   NOT a small follow-up — the original room-checkpoint spec's own §4
+   called the interact button "the single largest net-new mechanism in the
+   feature" (no existing interactable-tile precedent anywhere in the
+   engine, genuinely new `Pad`/settings/keybind work), comparable in real
+   scope to D15's own `switchWeapon` input work, not a quick add-on.
+   Re-classified up from an earlier, too-optimistic Tier-1 read for exactly
+   this reason. Assigned a real D-number as of the 2026-09-06 audit — every
+   other tracked-but-unbuilt system already had one; this was the one
+   exception, existing only as prose inside this doc.
 4. **D22 — Traversal Room archetype.** Touches `isLevelClear` semantics
    directly, and carries a real, still-open pacing question (a zero-enemy
    room's checkpoint becomes a free extra cinder/blueprint hand-in) that
-   needs a playtest to answer, not just code.
-5. **D23 — Flask charges.** A genuinely undecided design fork — where
+   needs a playtest to answer, not just code. **Sequencing note (2026-09-06
+   audit):** the fix is narrower than "touches `isLevelClear` semantics"
+   implies — `tests/verify_run.js:76` locks `RunLogic.isLevelClear([])`
+   at `false` as deliberate, load-bearing behavior for every ordinary
+   combat room; D22's own eventual spec should branch around the one real
+   call site (`70-sim.js:1244`) for a traversal-kind room specifically,
+   never touch `isLevelClear`'s own zero-length behavior.
+5. **D26 — Shop/hub UI.** Cited four separate times elsewhere in this doc
+   (D15, D20, D23, D24, plus the Lore Codex idea below) as a blocking
+   shared dependency — "every [currency-spend system] currently punts to
+   an F-key debug stand-in" — but never itself proposed as work until this
+   entry. Now genuinely time-sensitive, not merely untidy: every debug
+   F-key from F2 through F12 is claimed (confirmed against `95-app.js`
+   directly, 2026-09-06 audit) — **D23 will be the first purchase-shaped
+   feature in the entire roadmap with no F-key left to punt to.** A
+   concrete shape already sketched (2026-09-06 audit's own pitch F): a
+   literal, walkable Kilnkeeper hub room rather than a generic menu,
+   reusing D14's own interact-radius pattern (`TUBE_INTERACT_RADIUS`,
+   `_buildCheckpointAlcove`) made permanent, one narratively-grounded space
+   serving every currency-spend surface instead of each system inventing
+   its own entry point — the narrator already personifies "the kiln" as a
+   physical space in its own dialogue text (D11/D12). Medium-large: genuine
+   new player-facing UI/room-flow work, the same honest scope D14's own
+   tube was given, but pays down debt shared by D15/D20/D23/D24
+   simultaneously. Sequence before D23 specifically — D23 is the first
+   feature that structurally needs it.
+6. **D23 — Flask charges.** A genuinely undecided design fork — where
    charges refill is not resolved by the existing pitch and needs its own
    brainstorming pass before it can even be spec'd, not just built from
-   what's already written.
-6. **D20 — Grafts.** The largest net-new engine surface of the original
+   what's already written. Depends on D26 above for its own purchase
+   trigger, per the F-key-exhaustion finding.
+7. **D20 — Grafts.** The largest net-new engine surface of the original
    "core nine" — three chokepoints (`resolveBox` twice, `resolveSlam`, the
    kill-hook), a new per-run resource lifecycle, and one real, named design
    opinion (colour-gating a graft's bonus) the original pitch itself said
    needs a second reader, not a unilateral build call. Sequence last in
    this tier on purpose — lowest-risk-before-most-novel, applied literally.
+   **Standing-risk note (2026-09-06 audit):** this file's own
+   `40-combat.js`/`Combat.resolveBox` — D20's primary touch point — has an
+   equally dense adversarial bug history to `70-sim.js`/`45-enemy.js` (a
+   parry/`invulnerable()` ordering bug, a co-op double-Riposte-damage bug,
+   a stale-`alive()` Reflect bug, all D13-era) that the standing-risk
+   paragraph below never named; budget D20's own review accordingly.
 
 ### Tier 3 — parked, or blocked on a companion decision
 
-Unchanged from the original synthesis, restated for completeness: a
-second boss ("Cindermaw") needs a companion D12 reveal-logic decision
-before it can be sequenced at all; level-scoped generation presets are
-softest of the surviving generation pitches (every number an unmeasured
-placeholder) and worth building once D17 has its own tunable to fold in;
-run-to-run narrative memory is real depth but presentation-only, failing
-the roadmap's own "does it deepen the mechanical loop" test; the Lore
-Codex inherits rather than solves the shared shop-UI/`Menu` wiring gap
-every currency-spend pitch in Tier 2 also punts on.
+A second boss ("Cindermaw") needs a companion D12 reveal-logic decision
+before it can be sequenced at all — **worth naming as comparably
+high-leverage to any currently-queued Tier 2 system** (2026-09-06 audit):
+the game ships with exactly one boss and one room archetype, and both of
+the roadmap's own existing levers for that (Cindermaw, D22) are blocked or
+parked for reasons unrelated to build difficulty, not build size.
+Level-scoped generation presets — **precondition now satisfied, no longer
+purely hypothetical** (2026-09-06 audit): this entry originally read
+"worth building once D17 has its own tunable chance constant to fold in";
+D17 shipped `CFG.GEN_HAZARD_BEAT_CHANCE` as of v0.2.22, so the stated
+trigger has fired — every number in the preset idea is still an unmeasured
+placeholder, so this remains a real brainstorming pass away from a spec,
+but it is no longer blocked on anything. Run-to-run narrative memory is
+real depth but presentation-only, failing the roadmap's own "does it
+deepen the mechanical loop" test; the Lore Codex inherits rather than
+solves the shared shop-UI/`Menu` wiring gap every currency-spend pitch in
+Tier 2 also punts on — see **D26** above, which now owns that gap.
 
 ---
 
