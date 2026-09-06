@@ -150,6 +150,19 @@ var CFG = {
   // own bonus hit, §4). Initial value, not yet swept.
   STAGGER_FRAMES: 30,
 
+  /* --- dominance breakpoints (30-player.js, D19) -------------------------
+   * Three passives, one per D2 stat colour, each modifying one D13 ability
+   * whenever that colour is currently `dominantColour(stats)` (strictly
+   * the unique highest of ember/umbral/verdant — see the spec's own §2).
+   * Not measured — named design judgments, the same discipline
+   * META_MAXHP_COST/GEN_MIN_FIGHT_TILES already use. Picked to land at
+   * roughly the same relative magnitude (~25-27%) across all three so no
+   * colour's own breakpoint reads as obviously stronger than the other
+   * two by construction, not by luck. */
+  DOMINANCE_DASH_CD_REDUCTION: 8,    // ember:  30 -> 22 frames, ~27% shorter
+  DOMINANCE_PARRY_WINDOW_BONUS: 3,   // umbral: 12 -> 15 frames, 25% wider
+  DOMINANCE_ROLL_CD_REDUCTION: 6,    // verdant: 24 -> 18 frames, 25% shorter
+
   // damage / life
   MAX_HP: 3,                // STARTING max hp every run — see STAT_HP_GAIN,
                              // player.maxHp is the per-run figure this grows

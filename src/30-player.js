@@ -90,6 +90,23 @@ function pickStatColour(stats, rng) {
   return STAT_COLOURS[STAT_COLOURS.length - 1];
 }
 
+/* D19: the general form of the same "strictly unique highest, a tie
+ * doesn't count" rule gainStat's own inline dominance check already used
+ * (below) for its own narrow question ("was the just-incremented colour
+ * the one that came out on top"). Extracted so D19's three passives and
+ * D20 (Grafts, future) can both ask "what's dominant right now" without
+ * re-deriving the rule a second and third time. Returns null on a tie
+ * (two- or three-way) — matching gainStat's own existing "a tie grants no
+ * maxHp bonus" behavior generalized to every consumer of this function. */
+function dominantColour(stats) {
+  var max = Math.max(stats.ember, stats.umbral, stats.verdant);
+  var winner = null, ties = 0, k;
+  for (k in stats) {
+    if (stats[k] === max) { ties++; winner = k; }
+  }
+  return ties === 1 ? winner : null;
+}
+
 function Player(id, x, y) {
   this.id = id | 0;
   this.spawnX = x;
@@ -622,7 +639,12 @@ Player.prototype.update = function (pad, world, bus) {
     if (pad.buffered('parry') && this.parryCd <= 0 && this.parryWindow <= 0) {
       pad.consume('parry');
       C.Combat.cancel(this, bus);
-      this.parryWindow = CFG.PARRY_WINDOW_FRAMES;
+      // D19: umbral dominance widens the parry window itself. Checked
+      // fresh at the moment of the press, same discipline as endDash's
+      // ember check and endRoll's verdant check.
+      this.parryWindow = dominantColour(this.stats) === 'umbral'
+        ? CFG.PARRY_WINDOW_FRAMES + CFG.DOMINANCE_PARRY_WINDOW_BONUS
+        : CFG.PARRY_WINDOW_FRAMES;
       bus.emit('parryStart', { id: this.id, x: b.x, y: b.y });
     }
 
@@ -750,7 +772,14 @@ Player.prototype.finish = function (world, bus, wasGrounded, axis) {
 
 Player.prototype.endRoll = function (world, bus) {
   var b = this.body;
-  this.rollCd = CFG.ROLL_COOLDOWN_FRAMES;
+  // D19: verdant dominance shortens Roll's own cooldown. Checked fresh
+  // here, not snapshotted at roll-entry or anywhere else — the same
+  // "read at the moment of the effect" discipline D24's own capacity
+  // check uses, so a stat gain mid-roll can change the NEXT roll's
+  // cooldown even though it can never affect the roll already ending.
+  this.rollCd = dominantColour(this.stats) === 'verdant'
+    ? CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION
+    : CFG.ROLL_COOLDOWN_FRAMES;
   // D17: disarm the wall-leniency the instant the roll that armed it ends
   // — the exemption must never outlive its own roll (30-player.js's own
   // roll-entry block is the only place this is ever set true).
@@ -771,7 +800,12 @@ Player.prototype.endRoll = function (world, bus) {
 
 Player.prototype.endDash = function (world, bus) {
   var b = this.body;
-  this.dashCd = CFG.DASH_COOLDOWN_FRAMES;
+  // D19: ember dominance shortens Ember Dash's own cooldown. Checked fresh
+  // at end-of-dash, same discipline as endRoll's own verdant check below —
+  // never snapshotted at dash-entry.
+  this.dashCd = dominantColour(this.stats) === 'ember'
+    ? CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION
+    : CFG.DASH_COOLDOWN_FRAMES;
   // Dash Extended I-Frames (§4): the dash's own i-frames already cover its
   // full committed duration (invulnerable()'s state === 'dash' check) —
   // "extended" means a residual window immediately AFTER it ends, not a
@@ -831,8 +865,14 @@ Player.prototype.hurt = function (amount, bus, knock) {
  * this function only ever applies a gain already chosen, it never picks. */
 Player.prototype.gainStat = function (colour, bus) {
   this.stats[colour]++;
-  var v = this.stats[colour], dominant = true, k;
-  for (k in this.stats) { if (k !== colour && this.stats[k] >= v) dominant = false; }
+  var v = this.stats[colour];
+  // D19: generalized onto dominantColour() — provably equivalent to the
+  // inline check this replaced for every real call, since gainStat only
+  // ever increments the one `colour` passed in: at this point `colour`'s
+  // value is the only one that just changed, so it is the unique max
+  // under dominantColour's rule if and only if no other stat was already
+  // >= v under the old inline check.
+  var dominant = dominantColour(this.stats) === colour;
   if (dominant) {
     this.maxHp += CFG.STAT_HP_GAIN;
     this.hp += CFG.STAT_HP_GAIN;
@@ -843,6 +883,7 @@ Player.prototype.gainStat = function (colour, bus) {
 
 C.Player = Player;
 C.pickStatColour = pickStatColour;
+C.dominantColour = dominantColour;
 C.STAT_COLOURS = STAT_COLOURS;
 
 })(CINDER);

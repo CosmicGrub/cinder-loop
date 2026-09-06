@@ -1,6 +1,8 @@
 # Dominance Breakpoints (D19)
 
-Status: design approved by user 2026-09-06. Not yet implemented.
+Status: implemented (D19), see `30-player.js`'s `dominantColour`/
+`gainStat`/`endDash`/`endRoll`/parry-trigger and `00-core.js`'s
+`DOMINANCE_*` constants.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (Tier 2,
 item 1 — "connects two shipped-but-never-linked systems; makes colour
@@ -205,3 +207,28 @@ add.
 - The `dominantColour(stats)` extraction being consumed by D20 (Grafts)
   itself — this spec only builds and exports the function; wiring a
   second consumer is D20's own, separate spec.
+
+## 9. Amendment (2026-09-06, before implementation) — the named tension with `pickStatColour`
+
+The 2026-09-06 roadmap audit (§6) named a real, worth-stating-explicitly
+tension this spec did not originally address: `pickStatColour`
+(`30-player.js:77-90`) is a deliberate anti-death-spiral mechanic that
+gives the *currently-dominant* colour the least weight of the three (an
+86% chance of a pickup landing on one of the other two at 3/1/1) — the
+opposite of a system that rewards *sustaining* dominance the way this
+spec's three passives now do. §8 already locked "changing the underlying
+D2 stat-gain weighting... stays exactly as it is" before the audit ever
+ran, which already answers the audit's implicit question about scope: no
+code changes as a result of this finding. What was missing is the
+explicit design stance the audit asked for. Stated plainly: **dominance
+is meant to be a fragile, contested state, not a stable build.**
+`pickStatColour`'s own bias means a player who leans into one colour is
+fighting the game's own correction every pickup to stay there — the
+three passives are a reward for winning that fight moment-to-moment, not
+a permanent payoff for a build choice made once. This is consistent with
+§3's own "checked fresh, not snapshotted" design (a passive can and will
+drop mid-run the instant a pickup lands on a different colour) and with
+`gainStat`'s own preexisting comment calling the anti-death-spiral
+property "load-bearing." No spec section above changes; this section
+exists so a future reader doesn't have to rediscover the tension the
+audit found and wonder whether it was missed rather than considered.

@@ -1243,6 +1243,163 @@ function gapScenario(gapX0, gapWidth, farWall) {
   s.eq('and still arms the window the same tick', a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
 }
 
+/* =================================================== dominance breakpoints
+ * (D19). Three passives, one per D2 stat colour, each modifying one D13
+ * ability whenever dominantColour(stats) reads that colour — checked
+ * fresh at the moment of the effect, never snapshotted (spec §3). Stats
+ * are set directly on the player rather than routed through real
+ * pickups — the same division of labor the dash-enhancement section
+ * above and verify_stats.js's own weapon-scaling tests already use: this
+ * file's job is proving what dominance actually changes about movement,
+ * not re-proving gainStat/pickStatColour/dominantColour itself, which
+ * verify_stats.js already owns.
+ */
+{
+  // Ember dominant shortens Ember Dash's own cooldown.
+  const a = fresh();
+  a.p().stats.ember = CFG.STAT_START + 5;   // sole leader, strictly dominant
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');   // roll while airborne = dash
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('ember dominance shortens the dash cooldown',
+    a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION);
+
+  // Without ember dominant (a tie, the default fresh stats), the ordinary
+  // cooldown applies.
+  const b = fresh();
+  b.hold('jump').step(1).release('jump');
+  let h = 0;
+  while (b.b().onGround && h++ < 30) b.step(1);
+  b.tap('roll');
+  let h2 = 0;
+  while (b.count('dashEnd') === 0 && h2++ < 60) b.step(1);
+  s.eq('without ember dominance, the ordinary dash cooldown applies', b.p().dashCd, CFG.DASH_COOLDOWN_FRAMES);
+}
+{
+  // A DIFFERENT colour dominant (not ember) still gets the base dash
+  // cooldown — proving this checks specifically for 'ember', not "any
+  // dominance at all".
+  const a = fresh();
+  a.p().stats.umbral = CFG.STAT_START + 5;
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('umbral dominance does not touch the dash cooldown', a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES);
+}
+{
+  // Verdant dominant shortens Roll's own cooldown.
+  const a = fresh();
+  a.p().stats.verdant = CFG.STAT_START + 5;
+  a.hold('roll').step(1).release('roll');
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  s.eq('verdant dominance shortens the roll cooldown',
+    a.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION);
+
+  const b = fresh();
+  b.hold('roll').step(1).release('roll');
+  let h = 0;
+  while (b.count('rollEnd') === 0 && h++ < 60) b.step(1);
+  s.eq('without verdant dominance, the ordinary roll cooldown applies', b.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES);
+}
+{
+  // Umbral dominant widens the parry window itself, at the moment of the
+  // press.
+  const a = fresh();
+  a.p().stats.umbral = CFG.STAT_START + 5;
+  a.tap('parry');
+  s.eq('umbral dominance widens the parry window',
+    a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES + CFG.DOMINANCE_PARRY_WINDOW_BONUS);
+
+  const b = fresh();
+  b.tap('parry');
+  s.eq('without umbral dominance, the ordinary parry window applies', b.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
+}
+{
+  // A tie (no dominant colour at all) gets every ability's ordinary base
+  // value — dominantColour returns null on a tie, and null !== any real
+  // colour name, so this falls through to the base case for free; worth
+  // its own assertion rather than assuming the string-mismatch logic
+  // generalizes.
+  const a = fresh();
+  a.p().stats.ember = a.p().stats.umbral = a.p().stats.verdant = CFG.STAT_START + 5;
+  a.tap('parry');
+  s.eq('a three-way tie gets the ordinary parry window', a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
+}
+{
+  // Mid-run colour shift, DURING an in-flight roll: dominance changing
+  // strictly AFTER the trigger tick and strictly BEFORE the end tick must
+  // still be reflected in that SAME roll's own ending cooldown — proving
+  // endRoll reads dominantColour() fresh at the moment it fires, never
+  // snapshotted back at roll-entry (spec §3's own "checked fresh, not
+  // snapshotted" rule).
+  //
+  // An earlier version of this test mutated stats only AFTER the first
+  // roll had already fully ended, then triggered a brand-new SECOND roll
+  // once dominance was already set — caught by an adversarial review pass
+  // as a real test gap: that sequence cannot distinguish "checked fresh
+  // at exit" from "cached once at entry", since by the time any roll's
+  // own trigger tick runs, dominance is already whatever it is going to
+  // be for that roll's whole duration either way. Only a mutation landing
+  // strictly BETWEEN one roll's own trigger and its own end can tell the
+  // two implementations apart, so that is what this drives.
+  const a = fresh();
+  a.hold('roll').step(1).release('roll');
+  s.eq('the roll begins with no dominance yet', a.p().state, 'roll');
+  a.p().stats.verdant += 10;   // mutated strictly mid-roll, before endRoll fires
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  s.eq('the SAME roll ends with the shortened cooldown, proving endRoll reads dominance fresh at exit',
+    a.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION);
+}
+{
+  // No interaction with existing D13 enhancements (spec §5): owning Dash
+  // Extended I-Frames alongside ember dominance still produces BOTH the
+  // enhancement's own residual iframes AND the dominance-shortened
+  // cooldown, neither overriding the other.
+  const a = fresh();
+  a.p().dashExtIframes = true;
+  a.p().stats.ember = CFG.STAT_START + 5;
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('the D13 enhancement\'s own residual iframes still fires', a.p().iframes, CFG.DASH_EXT_IFRAMES_BONUS);
+  s.eq('and the D19 dominance-shortened cooldown still applies, independently',
+    a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION);
+}
+{
+  // Determinism (L4): a scripted stat-shift -> dominance-change -> real
+  // ability sequence hashes byte-identical across two runs from the same
+  // seed. dominantColour() consumes no RNG of its own — it is a pure
+  // function of the already-hashed stats field, so this is a confirming
+  // check rather than new hash-surface, but worth proving directly
+  // rather than assumed (spec's own §7, last bullet).
+  function run() {
+    const a = H.scenario({ seed: 23, log: false });
+    a.settle();
+    a.p().stats.verdant += 3;   // now dominant
+    a.hold('roll').step(1).release('roll');
+    let g = 0;
+    while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+    a.step(30);
+    a.tap('parry');
+    a.step(30);
+    return a;
+  }
+  const r1 = run(), r2 = run();
+  s.ok('a dominance-shift-and-ability sequence is deterministic (L4)',
+    r1.sim.hash() === r2.sim.hash(), 'seed 23');
+}
+
 /* =============================================================== crouch */
 {
   const a = fresh();
