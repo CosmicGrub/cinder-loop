@@ -1114,6 +1114,17 @@ const CFG = C.CFG, MetaLogic = C.MetaLogic, RunLogic = C.RunLogic, DATA = C.DATA
   a.sim.meta.currency = CFG.META_BACKPACK_SLOT_COST + 3;
   s.eq('a second buy is refused outright — a one-time flag, not stackable', a.sim.buyBackpackSlot(), false);
   s.eq('and charges nothing for the refusal, even with currency to spare', a.sim.meta.currency, CFG.META_BACKPACK_SLOT_COST + 3);
+
+  // Adversarially found: the shared `enh` buyX loop above proves this exact
+  // "ownership survives a genuine restart" property for the other three
+  // flag purchases, but backpackSlot can't reuse that loop — unlike them,
+  // it has no player-side mirror (a.p().backpackSlot doesn't exist; capacity
+  // is read fresh from meta at every drop, by design, see _blueprintCapacity's
+  // own comment), so the loop's a.p()[flag] check would fail on it
+  // immediately. Asserted directly instead, so this property has real
+  // coverage rather than none.
+  a.sim.beginRun(33);
+  s.eq('ownership survives a genuine restart (beginRun())', a.sim.meta.backpackSlot, true);
 }
 
 {
