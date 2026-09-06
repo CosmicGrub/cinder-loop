@@ -73,6 +73,10 @@ run_suite() {
   return 0
 }
 
+echo "-- build tooling ---------------------------------------------------------"
+run_suite verify_build
+echo
+
 echo "-- sim -----------------------------------------------------------------"
 run_suite verify_arch
 run_suite verify_core
