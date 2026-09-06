@@ -5,6 +5,105 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.24 — 2026-09-06 — Roadmap audit response: a build.py bug, spec hygiene, seven silent Bus events wired, per-room enemy composition (D27)
+
+**GREEN: 3298/3298 assertions across 18 suites** (a new `verify_build`
+suite added, `verify_arch` grew from 224 to 239, `verify_core` shrank
+from 55 to 53, `verify_audio` grew from 338 to 466, `verify_run` grew
+from 214 to 647), `cinder-loop.html` at 470,539 bytes. Five separate
+commits, all produced in direct response to a 6-agent parallel audit of
+every spec, the roadmap, undocumented scaffolding, test/build tooling,
+architecture, and gameplay content depth
+(`docs/superpowers/pitches/2026-09-06-roadmap-audit-and-new-pitches.md`,
+54 findings) — this entry covers what was acted on immediately; the
+audit document itself names everything else, prioritized, for later.
+
+**A real, reproduced `build.py` bug, not a style note.** Module discovery
+only checked that every REQUIRED file was present, never that PRESENT
+files were only the required ones, and had no duplicate-numeric-prefix
+guard. Reproduced directly: copying an existing file to a stray filename
+built and shipped with zero warning, silently concatenated into the
+module chain purely by filename sort order. Two new guards close it —
+and the first one immediately caught a SECOND, real, pre-existing bug:
+`56-caller.js` (D16) had never been added to `REQUIRED` at all; the build
+was relying on auto-discovery alone for a file its own required-module
+list didn't know about. New `tests/verify_build.js` (18 assertions, a new
+"build tooling" gate section) — `build.py` had zero dedicated test
+coverage before this.
+
+**Seven real Bus events fired every run with zero presenter consumer** —
+not even the deliberate "recorded, no visual yet" stub every other
+consciously-deferred effect already gets: `parryStart`, `ledgeGrab`,
+`ledgeClimb`, `ledgeRelease`, `statGain`, `blueprintDrop`, `blueprintLost`.
+Most notably, the entire ledge-grab/mantle system — real geometry, real
+hitbox measurement, extensively regression-tested since v0.2.12 — had no
+audio or visual feedback at all for grabbing, climbing, or releasing a
+ledge. Six new SFX cues and particle handlers wired (`ledgeRelease` stays
+visual-only, matching `crouch`/`uncrouch`/`wallTouch`'s own precedent);
+`blueprintLost` is audio-only since its real payload carries no
+coordinate to burst a particle at. New tests in `verify_audio.js` (the
+shared generic TRIGGERS-loop coverage) and a new section in
+`verify_arch.js` exercising each new handler for the exact "payload
+missing a field, particle spawns at NaN" bug class this project has
+already shipped and fixed twice before (`rollStart` and `step`).
+
+**Per-room enemy composition (D27)** — the audit's own top recommendation,
+prioritized over every other finding including several real bugs, because
+it is the one axis a player notices every room of every run rather than
+once per level or once per run. `RunLogic.placeEnemies` looped
+`DATA.ENEMY_IDS` unconditionally; a player had seen the entire regular
+roster by the end of room 0 of their very first run, and room 0 and the
+room right before the boss presented an identical threat level. New
+`pickRoomComposition(rng, roomIndex)`: room 0 draws a random 2-3 template
+subset (re-sorted back into `ENEMY_IDS`' own teaching-progression order,
+not left in whatever order the random pick produced); the room before the
+boss draws all 4 plus 1-2 repeats; every other room, and every existing
+no-`roomIndex` call site, keeps the exact pre-existing default. A
+pure-function change to an already-tested function touching none of the
+three files the roadmap's own standing-risk paragraph names — a dedicated
+adversarial pass was skipped in favor of thorough test coverage, the same
+reasoned call D21 made for a change this scoped.
+
+**Six approved specs had gone stale, silently.** Six of eight specs still
+said "Not yet implemented" despite having shipped; two (D16, D15) asserted
+things the shipped code had since disproven or left unmentioned (D16's
+"no terrain-probing needed" claim, contradicted by its own adversarial
+pass's fix; D15's missing save-hook requirement, which became that
+feature's own bug #1); D13's Parry definition was ambiguous in a way the
+code had to resolve unilaterally (base Parry is a full no-op against
+ranged attacks until Reflect is owned); two specs (the first two ever
+written) had no Testing-approach section at all. All six status lines
+updated, all four content gaps amended, both testing sections retrofitted.
+
+**The roadmap doc itself got three real corrections.** A shop/hub UI was
+cited four times as a blocking dependency for currency-spend features but
+never itself proposed as work — now genuinely time-sensitive, not merely
+untidy: every debug key from `F2` through `F12` is claimed, and D23
+(Flask charges) will be the first purchase-shaped feature with nowhere
+left to punt to. Assigned its own number (D26), sequenced before D23,
+with a concrete shape already sketched (a literal Kilnkeeper hub room).
+"Finish D14's cinder economy" — already re-classified to D15-sized scope
+— never had a reserved D-number the way every other tracked-but-unbuilt
+system did; assigned D25. The standing-risk paragraph (`70-sim.js`'s core
+and `45-enemy.js`'s state machine as the only named bug-prone files) was
+already falsified by D17, which touched neither file and still produced
+5 bugs — generalized to the pattern the project's actual history
+supports, and `40-combat.js`'s `Combat.resolveBox` (D20's own primary
+touch point, with an equally dense D13-era bug history) added to it.
+
+**What was deliberately not acted on here — named in the audit, left for
+later, not forgotten:** the remaining ~45 lower-priority findings
+(architecture health — a real layering violation, `70-sim.js` bundling
+four responsibilities across 1400 lines, a hash-desync risk class that's
+already bitten once; test-suite growth — `verify_move.js`/`verify_meta.js`
+each absorbed a separately-specced feature's tests without their own
+file; several concrete new gameplay pitches — elite affix variants,
+enemies taking hazard damage, a native "wager" curse-analog, colour-affix
+rerolls on blueprint drops). See the audit document's own §8 for the full,
+prioritized list.
+
+---
+
 ## v0.2.23 — 2026-09-04 — Backpack slot: carriedBlueprint becomes carriedBlueprints, a capacity 1 → 2 purchase (D24)
 
 **GREEN: 2705/2705 assertions across 17 suites (`verify_meta` grew from
