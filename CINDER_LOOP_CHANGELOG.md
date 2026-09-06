@@ -5,6 +5,145 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.23 — 2026-09-04 — Backpack slot: carriedBlueprint becomes carriedBlueprints, a capacity 1 → 2 purchase (D24)
+
+**GREEN: 2705/2705 assertions across 17 suites (`verify_meta` grew from
+399 to 450 — no new suite). `cinder-loop.html`, 460,716 bytes.**
+`CFG.META_BLUEPRINT_CAPACITY: 1` (`00-core.js:348`) has carried the same
+trailing comment since D4 shipped in v0.2.14: "per player; a 'backpack
+slot' purchase would raise this later — deferred." D24
+(`docs/superpowers/specs/2026-08-31-backpack-slot-design.md`, approved
+2026-08-31; Tier 1's third and deliberately last-ranked item on the
+post-D13 roadmap — "natural filler, not something to reach for first")
+is that purchase. Every touch point already existed in scalar form; this
+generalizes each from "exactly one" to "up to capacity" and adds the one
+purchase that raises capacity. Nothing else.
+
+**A scalar becomes a plain array, and capacity becomes a query rather
+than a value.** `Player.prototype.resetTransient` (`30-player.js:211`):
+`this.carriedBlueprint = null` → `this.carriedBlueprints = []`, a
+dynamic-length array whose `.length` IS the fill level, no null-padding.
+The number of slots is deliberately never stored on `Player` — it has no
+`Meta` access, the same one-way dependency `30-player.js` has always
+kept — so a module-private `_blueprintCapacity(meta)` in `70-sim.js`
+(`70-sim.js:495-497`, `CFG.META_BLUEPRINT_CAPACITY + (meta.backpackSlot ?
+1 : 0)`) answers it fresh at the ONE site that cares, the kill-roster
+`'targetDown'` drop listener (`70-sim.js:203`, "has room," not "is
+empty"; still the first player with room, never whoever landed the
+kill). That single decision is what makes the purchase five lines:
+unlike `buyMaxHp`, which copies a VALUE onto each player and so needs a
+live top-up loop plus an `_applyMetaToPlayer` line,
+`Sim.prototype.buyBackpackSlot` (`70-sim.js:502-509`) is the four D13
+purchases' shape minus their loop — double-purchase guard,
+`MetaLogic.spendOnBackpackSlot`, write currency, flip
+`meta.backpackSlot` — and the very next drop after buying already sees
+the raised capacity, mid-run or not. Pinned exactly that way: the test
+buys the slot MID-RUN, after `beginRun()`, and brute-forces real seeded
+roster kills until a second real drop lands on a player already carrying
+one, then confirms a third never does across ten more real kills
+(`verify_meta.js:1112-1145`).
+
+**`CFG.META_BACKPACK_SLOT_COST: 15` (`00-core.js:367-373`), priced at
+the cheap end of the 15-25 band on purpose.** A narrower, situational
+QoL purchase — it only ever matters while already carrying one
+un-handed-in blueprint AND a second, different, still-locked one drops
+before the next checkpoint — not a combat-power purchase like Riposte
+(20) or Reflect (25). `Meta.backpackSlot = false` (`65-meta.js:73-76`), a
+fifth flat-cost boolean beside the four D13 flags; `sanitize`
+(`65-meta.js:113`) accepts only a real boolean, so a hand-edited
+non-boolean falls back to `false` rather than poisoning the load;
+`spendOnBackpackSlot` (`65-meta.js:214-217`) reuses `RunLogic.spend` like
+every spend before it. No new persistence machinery.
+
+**Every scalar touch point, generalized — the interesting one is hand-in
+order.** `_handInCarriedBlueprints` (`70-sim.js:1070-1109`) walks every
+carried item in array order — acquisition order, since items are only
+ever `.push()`ed — so a player carrying two different locked blueprints
+and short on currency for both opportunistically unlocks whichever they
+found FIRST; not a rule designed around, the natural consequence of FIFO
+push order, stated and pinned rather than left implicit
+(`verify_meta.js:1195-1214`: exactly one unlock's worth of currency, the
+first-acquired id unlocks, the second is consumed unaffordably, currency
+bottoms out at zero, both slots still emptied). §5m's own
+adversarially-found `handedIn.push` placement survives per item; the
+clear (`70-sim.js:1106`) is once per carrier after the loop, so the
+method stays self-contained at both its call sites. A duplicate CAN sit
+in one player's two slots — `rollBlueprintDrop` (`65-meta.js:171-179`)
+excludes only already-unlocked ids, never carried ones — and the first
+copy's unlock makes the second copy's spend an `isUnlocked` no-op, the
+identical mechanism the existing co-op two-carriers-same-weapon test
+already pins. `_stepRun`'s death-moment notification
+(`70-sim.js:1192-1194`) emits one `blueprintLost` per item, same payload
+shape, so no consumer changes. `hash()` gains `meta.backpackSlot` beside
+the four D13 flags (`70-sim.js:1331`) and the per-player line becomes an
+order-SENSITIVE `join(',')` (`70-sim.js:1352`) — FIFO hand-in order is
+observable behavior, so the same two ids in the other order are a
+genuinely different state, asserted directly (`verify_meta.js:1236-1251`).
+Debug key `F12` (`95-app.js:521`), the next free slot after F11's Caller,
+with the same `saveMeta`-on-success §5m's data-loss finding made
+mandatory.
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2705/2705 assertions across 17 suites**, `cinder-loop.html` at
+460,716 bytes. Fifty-one new assertions in `verify_meta.js`: the
+sanitize round trip, the purchase contract (refuses unaffordable and
+spends nothing, spends exactly the cost, refuses a second buy outright
+and charges nothing for the refusal), the mid-run real-drop capacity
+proof, two locked handed in at one checkpoint (both unlocked, spent
+twice, two `blueprintUnlocked` events, `handedIn` in acquisition order),
+one locked plus one already-unlocked (spent once), the FIFO
+affordable-for-one case, death while carrying two (two `blueprintLost`,
+both ids), and the hash-order assertion; every pre-existing single-carry
+test migrated to the array shape with what it claims unchanged.
+
+**Adversarially reviewed (3 dimensions, 24 raw findings) — no production
+bug, but seven real test-coverage gaps and one debug-key gotcha, all
+fixed in `62ea8cf`.** The headline: the double-purchase guard's own test
+passed for the wrong reason — it ran the second buy with currency below
+the cost, so `RunLogic.spend`'s affordability check refused it and the
+`if (this.meta.backpackSlot) return false;` guard was never what the
+assertion exercised (deleting the guard left the suite green; verified
+by mutation before fixing). Also: a dead `|| null` per-seed assertion
+inflating the count; a tautological "never a third" check re-asserting
+its own search criterion; the `hash()` join separator unproven (a bare
+concatenation survived the whole suite — now caught by `['ab','c']` vs
+`['a','bc']`); the death test checking only one of two ids stayed
+locked; `spendOnBackpackSlot` missing from the shared `RunLogic.spend`
+contract table; and spec §9's own last bullet never implemented — two
+REAL drops through a REAL checkpoint, replayed and hashed byte-identical
+(L4), then re-driven with the slot NOT owned to prove the flag is the
+ceiling (a capacity that ignored the flag was caught by nothing in the
+D24 section before this). `F12`'s browser default (DevTools) is now
+`preventDefault`'d so the debug buy doesn't steal keyboard focus. Nine
+stale scalar-era `carriedBlueprint` comments corrected, and the hand-in
+FIFO note narrowed to what is true: per carrier only — across players,
+spend priority is player index. Three design observations recorded, not
+changed: a drop rolled when no alive player has room is silently
+discarded (pre-existing — the listener has no "nobody had room" branch);
+risk concentrates on the lowest-index alive player (P0 fills both slots
+before P1 gets one); and no other debug F-key calls `preventDefault`
+either, so in a browser `F5` still fires its own page reload alongside
+the lock toggle — pre-existing, outside this change.
+
+**What was deliberately not done here (spec §10).** Cinders —
+`player.carriedCinders` still does not exist as a field; D14's reserved
+`CFG.CINDER_*`/`cinder*` scaffolding stays unwired, and this is
+blueprints-only per the pitch's own framing. Any further capacity
+purchase beyond the one 1 → 2 bump — a one-time flag, not stackable,
+like every other D8 boolean. Changing `rollBlueprintDrop` to exclude
+currently-carried, not-yet-unlocked ids — a real, separate, larger
+change for a benefit that is only ever "don't occasionally waste one RNG
+roll," and a case co-op already produces today. Any presenter-layer UI
+for carried blueprints — none exists for the single-slot version either
+(no reference to `carriedBlueprint`/`blueprintDrop`/`blueprintLost`
+anywhere in `80-view.js` or `95-app.js` outside the F12 line; the only
+presenter consumer of any blueprint event is `85-audio.js`'s
+`blueprintUnlocked` cue, which still fires once per unlock exactly as
+before). A real player-facing purchase trigger (shop/hub UI) — the
+already-named gap every D8 purchase shares.
+
+---
+
 ## v0.2.22 — 2026-08-31 — Roll-crossable hazard beats + the roll wall-leniency prerequisite, 5 adversarially-found bugs fixed (D17)
 
 **GREEN: 2654/2654 assertions across 17 suites (`verify_move` grew from

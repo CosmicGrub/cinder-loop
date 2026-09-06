@@ -1,6 +1,6 @@
 # Backpack slot (D24)
 
-Status: design approved by user 2026-08-31. Not yet implemented.
+Status: design approved by user 2026-08-31. Implemented as v0.2.23 (`14f388a`), adversarially reviewed.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md` (Tier 1,
 item 3 — "small and low-risk on its own terms, but correctly LOW

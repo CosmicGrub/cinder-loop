@@ -283,6 +283,7 @@ measurement of the code that is actually on disk.
 | D16 | A fifth enemy attack primitive, `attack: 'summon'`, realized as exactly one elite template — the Caller (`src/56-caller.js`, kept OUT of `DATA.ENEMIES`/`ENEMY_IDS` the same way Kilnwarden is, D9's roster staying hard-pinned at four). `Enemy.prototype.doTelegraph`'s attack switch (`45-enemy.js:396`) gains `case 'summon': this.callIn(ctx); this.enter('summon'); break;`, and `'summon'` gets its own real post-commit state — `Enemy.prototype.doSummon` (`45-enemy.js:502`), a near-copy of `'shoot'`'s own `doShoot()` — rather than falling straight to `'recover'`, a correction over the original pitch that would have made the Caller uniquely safe the instant it commits, unlike every other primitive in the game. `Enemy.prototype.callIn` (`45-enemy.js:452`) calls a real, independent Ashwalker into the fight through a new `ctx.addEnemy` bridge (`70-sim.js:87`, a two-line mirror of the existing `addShot`), gated by `this.summonsUsed >= m.summonMax` — a LIFETIME cap across the whole encounter, not a per-cast budget, reset in `resetTransient()` alongside every other per-life field. Summoned adds are excluded from room-clear/kill-currency by the SAME existing `_levelRosterIds` mechanism that already excludes the boot-path practice Dummy — no new exclusion logic needed. Reachable for v1 only via a new debug key, `F11` (`95-app.js`). | D9's own framing already priced this: "the engine knows four movement/attack primitives... a fifth archetype costs one new primitive" (`45-enemy.js`'s own header) — this is that fifth primitive, and `Sim.prototype.addEnemy` (`70-sim.js`) already existed, real and tested, making it nearly free to add on top of already-proven infrastructure rather than new machinery. A dedicated adversarial-verification pass (4 lenses, 17 raw findings, 21 confirmed after consolidating duplicates) found and fixed 5 real production bugs before this shipped — including a terrain-blind spawn offset that could climb a summoned add up through solid rock (the original design's own claim that "gravity resolves it" was false for a room's own full-height boundary walls) and a `summonsUsed` field excluded from `Sim.prototype.hash()` despite its own comment's claim of parity with `activeMove`/`phase` — proof the adversarial-verification discipline earns its keep on a feature this size, not a formality |
 | D17 | Two coupled pieces. (1) The physics prerequisite: `Body.prototype.wallLeniency`/`leaveRow` (`25-body.js:32-39`) — a bounded `moveX` exemption (`25-body.js:69-80`), armed only by `Player`'s own grounded-roll-entry code for the exact tile row a roll departs from (`30-player.js:547-552`) and disarmed the instant that specific roll ends (`endRoll`, `30-player.js:751-755`) — fixes a real collision-model gap verified empirically during implementation, not assumed: axis-separated collision (X resolves fully before Y every sub-step) blocks ANY flat-rise roll from ever landing on a far platform, at any gap size, because a roll starts at zero vertical velocity flush against the ground and sinks into the shared row within 1-2 ticks, before it can have crossed the gap horizontally — the originally-approved design's own distance-margin-only reasoning was false by itself. Roll-only, not Dash (Dash only ever triggers airborne); structurally inert for every enemy, since no `'roll'`/`'dash'` state exists anywhere in `45-enemy.js`. (2) Hazard beats: `CFG.GEN_HAZARD_BEAT_CHANCE` (0.15) is a per-beat roll in `generateCandidate`'s main loop (`50-gen.js`), capped at one per candidate and excluded from the first/last beat, spending `CFG.GEN_ROLL_HAZARD_TILES` — a real, measured capability constant with zero prior consumers — to place a flat-rise gap wider than a normal jump can cross but within Roll's own reach. `hazardEdgeAllowed(a,b)` validates it, deliberately its own function rather than folded into `edgeAllowed`; `buildGraph` gains an optional second parameter that independently re-validates and adds each recorded hazard edge BIDIRECTIONALLY, unlike the directed jump-edge graph, since flat-rise roll-crossability is symmetric by construction; `audit()` also rejects a candidate where any OTHER platform's own footprint would overlap a hazard beat's stamped gap span. A dedicated adversarial pass — including a real cross-feature interaction with D14's checkpoint alcove, which could silently overwrite a hazard strip with SOLID ground — found and fixed 5 real production bugs plus 2 test-coverage gaps before this shipped. | `CFG.GEN_ROLL_HAZARD_TILES` has been a real, measured number with zero consumers since it was written — this spends it, turning Roll into a genuine capability the generator actually asks for rather than only a defensive i-frame move; the wall-leniency fix is a real, previously-unknown collision-model gap this project's own physics-first verification standard caught before it shipped as a broken feature, not a design preference |
 | D21 | `82-narrative.js` finally subscribes to `'checkpoint'` (`bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });`, `82-narrative.js:126`) — the real Bus event D14's own `Sim.prototype._onRoomClear()` (`70-sim.js:1071`) already fires, with a declared consumer (D11's own reserved surface) that was never wired up until now. One new `DIALOGUE.narrator.checkpoint` line pool (`10-data.js`), sibling to `levelStart`/`bossEntry`/`reveal`/`bossVictory`/`death`. Zero new CFG, zero new Bus event, zero sim-file change — no branching on the payload's `healed`/`handedIn` fields, a single generic pool fires regardless, a named judgment resolved with the user over a two-pool tiered version (`checkpoint`/`checkpointFinal`) specifically to avoid `82-narrative.js` importing `CFG` for the first time in its history. | the cheapest system on the post-D13 roadmap, and correctly sequenced first in the revised Tier 1 — completes a declared-but-unbuilt half of D11 rather than opening a new design surface; preserving this file's zero-CFG-dependency purity was judged worth more than the modest texture gain a tiered pool would add |
+| D24 | `CFG.META_BLUEPRINT_CAPACITY`'s own deferred "backpack slot" purchase (`00-core.js:348`, a comment carried since D4), finally spent. `Player.carriedBlueprint` (scalar) becomes `carriedBlueprints` (`30-player.js:211`) — a plain dynamic-length array whose `.length` IS the fill level, no null-padding — and a fifth flat-cost boolean meta purchase, `CFG.META_BACKPACK_SLOT_COST` (15, `00-core.js:373`) / `meta.backpackSlot` (`65-meta.js:76`) / `MetaLogic.spendOnBackpackSlot` / `Sim.prototype.buyBackpackSlot` (`70-sim.js:502-509`), raises capacity 1 → 2. Capacity is never stored on the player (`Player` has no `Meta` access, the same one-way dependency it has always kept): a module-private `_blueprintCapacity(meta)` (`70-sim.js:495-497`) is read fresh at the ONE site that cares, the kill-roster drop listener (`70-sim.js:203`), so the purchase needs no live top-up loop the way `buyMaxHp` does — the very next drop after buying sees it, mid-run or not. Every scalar touch point generalizes from "exactly one" to "up to capacity": the drop loop ("has room," not "is empty"), `_handInCarriedBlueprints` (every item, in FIFO acquisition order — two locked blueprints affordable for one unlock the first-found), the death-moment notification (one `blueprintLost` per item, same payload), and `hash()` (an order-sensitive `join(',')`, plus `meta.backpackSlot` alongside the four D13 flags). Debug key `F12` (`95-app.js:521`). Blueprints only — cinders remain D14's separate, unwired scaffolding. | the roadmap pitch's own ranking, honored rather than argued with: "small and low-risk on its own terms, but correctly LOW priority within this tier — its standalone value is thin until a second carriable resource (cinders) exists to arbitrate against; natural filler." Priced at the cheap end of the 15-25 band because it is a situational QoL purchase (only matters while already carrying one un-handed-in blueprint AND a second, different, still-locked one drops before the next checkpoint), not combat power like its 20-25 siblings. Reading capacity as a query instead of copying it as a value is what makes the whole purchase five lines with zero reset-timing surface — no `_applyMetaToPlayer` line, no player-side mirror field, no death-timing edge case |
 
 All remaining design answers take the ★ defaults recorded in the phased answer sheet.
 
@@ -332,7 +333,8 @@ below it. **BUILT** marks a file that exists and is under test.
              PARRY zone + Assist-mode wiring (D13)
 95-app.js    boot, fixed-timestep accumulator, keyboard + gamepad + pause,          BUILT
              DPR-aware resize, lazy touch-layer construction; parry gamepad
-             binding, F7-F10 debug buys, telegraph-tracking touchController (D13)
+             binding, F7-F10 debug buys, telegraph-tracking touchController (D13),
+             F11 Caller spawn (D16), F12 backpack-slot buy (D24)
 ```
 
 Hitstop is split, deliberately: `70-sim.js` owns the COUNTER because it owns
@@ -1492,12 +1494,21 @@ itself could work at all), and the generator now spends that capability
 as a real, capped, first/last-beat-excluded hazard beat, stamped as an
 actual `TILE.HAZARD` strip; a real cross-feature interaction with D14's
 checkpoint alcove, which could silently overwrite a hazard strip with
-SOLID ground, was found and fixed alongside it.
+SOLID ground, was found and fixed alongside it. **Since v0.2.23:** the
+backpack slot (D24, §5v) — `CFG.META_BLUEPRINT_CAPACITY`'s own deferred
+purchase, real: `Player.carriedBlueprint` is now `carriedBlueprints`, a
+plain array, and a fifth flat-cost meta purchase (`buyBackpackSlot`, 15
+currency, `F12`) raises capacity 1 → 2 — read fresh from
+`meta.backpackSlot` at the one drop site that cares rather than copied
+onto the player, so it takes effect on the very next drop with no live
+top-up; hand-in walks every carried item in FIFO acquisition order, and
+death loses each one with its own `blueprintLost`.
 
-**Designed, not built:** two of D8's four named meta-currency purchases —
-flask charges and a backpack slot — real, open design space with no
-existing engine surface to build on, named and deliberately deferred
-rather than folded in quietly (§5m). Also not built: curses, grafts, and
+**Designed, not built:** flask charges — the last of D8's four named
+meta-currency purchases still unbuilt (the backpack slot, deferred
+alongside it here through v0.2.22, is real as of v0.2.23, §5v) — real,
+open design space with no existing engine surface to build on, named and
+deliberately deferred rather than folded in quietly (§5m). Also not built: curses, grafts, and
 the split/merge camera. A Galaxy Watch6 Classic
 companion status view (§5b) — not gameplay on the watch, a data view
 only, per the 2026-07-26 scoping decision. **Since v0.2.17 (D13, §5p):**
@@ -1555,7 +1566,17 @@ distance is actually measured — Dash parity is an assumption, not a
 measurement, and a real, separate follow-up); any change to
 `edgeAllowed`/`maxGapForRise`/`minGapForRise`/any existing jump-
 capability constant — hazard beats are strictly additive; reacting to
-hazard-beat placement in room-checkpoint narration or telemetry.
+hazard-beat placement in room-checkpoint narration or telemetry. **Since
+v0.2.23 (D24, §5v):** cinders — `player.carriedCinders` still does not
+exist as a field, D14's reserved scaffolding stays unwired, this is
+blueprints only; any further capacity purchase beyond the one 1 → 2 bump
+(a one-time flag, not stackable, like every other D8 boolean); changing
+`rollBlueprintDrop` to exclude currently-carried, not-yet-unlocked ids (a
+real, separate, larger change for a benefit that is only ever "don't
+occasionally waste one RNG roll," and a case co-op already produces
+today); any presenter-layer UI for carried blueprints (none exists for
+the single-slot version either); a real player-facing purchase trigger —
+`F12` is the identical debug-key stand-in every D8 purchase still has.
 
 **Scaffolding that must be deleted, not built on:** `demoLevel()` in
 `95-app.js` is retired from the primary boot path as of v0.2.6 (§5e) — boot
@@ -4188,6 +4209,187 @@ or any existing jump-capability constant — hazard beats are strictly
 additive. Reacting to hazard-beat placement in room-checkpoint narration,
 telemetry dashboards, or anywhere else outside `50-gen.js` +
 `tests/harness.js` + `tests/verify_gen.js`.
+
+---
+
+## 5v. The backpack slot — `carriedBlueprint` becomes `carriedBlueprints`, capacity 1 → 2 (v0.2.23, D24)
+
+**Spending a constant's own deferred comment, not opening new design
+space.** `CFG.META_BLUEPRINT_CAPACITY: 1` (`00-core.js:348`) has carried
+the same trailing comment since D4 shipped in v0.2.14 (§5m): "per player;
+a 'backpack slot' purchase would raise this later — deferred." D8 named
+the backpack slot as one of its four permanent-capability purchases from
+the start; the post-D13 roadmap pitch
+(`docs/superpowers/pitches/2026-08-24-post-d13-system-pitches.md`, Tier
+1, item 3) ranked it last in its tier on purpose — "small and low-risk on
+its own terms, but correctly LOW priority within this tier — its
+standalone value is thin until a second carriable resource (cinders)
+exists to arbitrate against. Natural filler, not something to reach for
+first." The spec (`docs/superpowers/specs/2026-08-31-backpack-slot-design.md`)
+was approved 2026-08-31, the same day the D17 sync landed, and
+implemented in one commit on 2026-09-04. Every touch point already
+existed in scalar form; this generalizes each from "exactly one" to "up
+to capacity" and adds the one purchase that raises capacity. Nothing
+else.
+
+**The data model: a scalar becomes a plain array.**
+`Player.prototype.resetTransient` (`30-player.js:211`):
+`this.carriedBlueprint = null` becomes `this.carriedBlueprints = []` — a
+dynamic-length array whose `.length` IS the current fill level, no
+null-padding to a fixed size. Capacity is deliberately NOT stored here:
+`Player` has no `Meta` access, the same one-way dependency
+`30-player.js` has always kept (`65-meta.js` sits below it in the
+stack), so the number of slots is a question only `70-sim.js` can
+answer. `teleport()` (`30-player.js:251`) still never touches the field —
+"a live transition is not a death," its own pre-existing reasoning — and
+needed no new code to keep that true.
+
+**Capacity is a query, not a value — which is why the purchase needs no
+live top-up.** `_blueprintCapacity(meta)` (`70-sim.js:495-497`) is a
+module-private function, not a `Sim.prototype` method:
+`CFG.META_BLUEPRINT_CAPACITY + (meta.backpackSlot ? 1 : 0)`. It has
+exactly one consumer — the kill-roster `'targetDown'` listener in the
+`Sim` constructor (`70-sim.js:171-208`), at the drop-assignment check
+(`70-sim.js:203`, `pl.carriedBlueprints.length <
+_blueprintCapacity(self.meta)` — "has room," not "is empty"; still the
+first player with room, never attributed to whoever landed the kill, the
+listener's own unchanged "a shared run resource" reasoning). Contrast
+`buyMaxHp` (`70-sim.js:478-489`): it copies a `maxHp`/`hp` VALUE onto
+each player at reset time, so buying it mid-run needs its explicit live
+top-up loop, and `_applyMetaToPlayer` needs a line to re-layer it on
+every reset. Capacity is never copied anywhere, so
+`Sim.prototype.buyBackpackSlot` (`70-sim.js:502-509`) is the four D13
+purchases' exact shape MINUS their loop: double-purchase guard (`if
+(this.meta.backpackSlot) return false;`), `MetaLogic.spendOnBackpackSlot`,
+write `meta.currency`, flip the flag, return `true`. No
+`_applyMetaToPlayer` line, no player-side mirror field, no per-player
+hash entry — the very next drop after purchase reads the raised
+capacity, mid-run or not. The test pins exactly that claim rather than
+the weaker reset-then-drop version: it buys the slot MID-RUN, after
+`beginRun()`, and brute-forces real seeded roster kills until a second
+real drop lands on a player already carrying one
+(`verify_meta.js:1119-1154`), then confirms a third never lands across
+ten more real kills — capacity is exactly 2, not "more than 1."
+
+**The purchase itself, the fifth flat-cost boolean of the same shape.**
+`CFG.META_BACKPACK_SLOT_COST: 15` (`00-core.js:367-373`), priced at the
+cheap end of the 15-25 band the four D13 enhancements occupy, on
+purpose: it is a narrower, situational QoL purchase — it only ever
+matters while already carrying one un-handed-in blueprint AND a second,
+different, still-locked one drops before the next checkpoint — not a
+combat-power purchase like Riposte (20) or Reflect (25).
+`Meta.backpackSlot = false` (`65-meta.js:73-76`) sits beside the four
+D13 flags; `sanitize` (`65-meta.js:113`) accepts only a real boolean, so
+a hand-edited localStorage `'yes'` falls back to `false` rather than
+poisoning the load (`verify_meta.js:119-126`); `spendOnBackpackSlot`
+(`65-meta.js:214-217`, exported at `65-meta.js:233`) reuses
+`RunLogic.spend` like every spend before it. No new persistence
+machinery — the existing `serialize`/`deserialize` round trip carries it
+for free.
+
+**Every scalar touch point, generalized.** `_handInCarriedBlueprints`
+(`70-sim.js:1070-1109`): the per-carrier body becomes a per-item loop
+inside the per-carrier loop, walked in array order — acquisition order,
+since items are only ever `.push()`ed — so a player carrying two
+different locked blueprints and short on currency for both
+opportunistically unlocks whichever they found FIRST. Not a rule
+designed around; the natural consequence of FIFO push order, stated
+explicitly and pinned (`verify_meta.js:1204-1223`: exactly one unlock's
+worth of currency, the first-acquired id unlocks, the second is consumed
+unaffordably, currency bottoms out at zero, both slots still emptied)
+rather than left implicit. The `handedIn.push(weaponId)` before either
+branch — §5m's own adversarially-found payload gap — survives per item;
+the `carrier.carriedBlueprints = []` clear (`70-sim.js:1106`) happens
+once per carrier after the loop, keeping the method self-contained at
+both its call sites (`_onRoomClear`, `70-sim.js:1120`, and true run-end)
+for the reason its own header already gives. A duplicate CAN now sit in
+one player's two slots: `rollBlueprintDrop` (`65-meta.js:171-179`)
+excludes only ids already in `meta.unlocked`, never ids currently being
+carried — the first copy processed unlocks the weapon, so
+`MetaLogic.isUnlocked` makes the second copy's spend a no-op, the
+identical mechanism the existing co-op two-carriers-same-weapon test
+already pins. `_stepRun`'s death-moment notification
+(`70-sim.js:1192-1194`) emits one `blueprintLost` per carried item, same
+payload shape, so no consumer changes (`verify_meta.js:1225-1244`: two
+events, both ids, both gone once the natural respawn fires, neither
+unlocked). `hash()` gains `meta.backpackSlot` alongside the four D13
+flags (`70-sim.js:1331` — it decides the very next drop's capacity, the
+same "affects later ticks" bar) and the per-player line becomes
+`p.carriedBlueprints.join(',')` (`70-sim.js:1352`), order-SENSITIVE on
+purpose: FIFO hand-in order is observable behavior, so
+`['daggers','warmaul']` and `['warmaul','daggers']` are genuinely
+different states, asserted directly rather than assumed
+(`verify_meta.js:1246-1270`).
+
+**Debug key F12 (`95-app.js:521`).** The next free slot — F2 through F11
+are all claimed, F11 by the Caller (D16). The same one-liner as F6-F10,
+including the `saveMeta` on success that §5m's own data-loss finding
+made mandatory for any purchase key. No player-facing trigger exists for
+ANY D8 purchase yet — the roadmap pitch names that once, as shared,
+already-accepted scope, not something this spec solves.
+
+**Verified against real sim ticks (L8).** `bash tests/run_all.sh` →
+**GREEN 2705/2705 assertions across 17 suites** (`verify_meta` grew from
+399 to 450, no new suite), `cinder-loop.html` at 460,716 bytes. Beyond
+the cases named above: the purchase contract itself (refuses
+unaffordable and spends nothing, spends exactly
+`META_BACKPACK_SLOT_COST`, refuses a second buy outright and charges
+nothing for the refusal — a one-time flag, not stackable,
+`verify_meta.js:1094-1117`); two different locked blueprints handed in at
+one checkpoint, both unlocked, currency spent twice, two
+`blueprintUnlocked` events, `handedIn` reported in acquisition order
+(`verify_meta.js:1156-1182`); one locked plus one already-unlocked
+carried together, both consumed, currency spent exactly once
+(`verify_meta.js:1184-1202`). Every pre-existing single-carry test
+migrated to the array shape with what it claims unchanged.
+
+**Adversarially reviewed (3 dimensions, 24 raw findings) — no production
+bug, but seven real test-coverage gaps and one debug-key gotcha, all
+fixed in `62ea8cf`.** The headline: the double-purchase guard's own test
+passed for the wrong reason — it ran the second buy with currency below
+the cost, so `RunLogic.spend`'s affordability check refused it and the
+`if (this.meta.backpackSlot) return false;` guard was never what the
+assertion exercised (deleting the guard left the suite green; verified
+by mutation before fixing). Also: a dead `|| null` per-seed assertion
+inflating the count; a tautological "never a third" check re-asserting
+its own search criterion; the `hash()` join separator unproven (a bare
+concatenation survived the whole suite — now caught by `['ab','c']` vs
+`['a','bc']`); the death test checking only one of two ids stayed
+locked; `spendOnBackpackSlot` missing from the shared `RunLogic.spend`
+contract table; and spec §9's own last bullet never implemented — two
+REAL drops through a REAL checkpoint, replayed and hashed byte-identical
+(L4), then re-driven with the slot NOT owned to prove the flag is the
+ceiling (a capacity that ignored the flag was caught by nothing in the
+D24 section before this). `F12`'s browser default (DevTools) is now
+`preventDefault`'d so the debug buy doesn't steal keyboard focus. Nine
+stale scalar-era `carriedBlueprint` comments corrected, and the hand-in
+FIFO note narrowed to what is true: per carrier only — across players,
+spend priority is player index. Three design observations recorded, not
+changed: a drop rolled when no alive player has room is silently
+discarded (pre-existing — the listener has no "nobody had room" branch);
+risk concentrates on the lowest-index alive player (P0 fills both slots
+before P1 gets one); and no other debug F-key calls `preventDefault`
+either, so in a browser `F5` still fires its own page reload alongside
+the lock toggle — pre-existing, outside this change.
+
+**What was deliberately not done here (spec §10).** Cinders —
+`player.carriedCinders` still does not exist as a field at all; D14's
+reserved `CFG.CINDER_*`/`cinder*` scaffolding stays unwired, and this
+spec is blueprints-only per the pitch's own framing. Any further
+capacity purchase beyond the one 1 → 2 bump — a one-time flag, matching
+every other D8 boolean purchase, not stackable. Changing
+`rollBlueprintDrop` to exclude currently-carried, not-yet-unlocked ids —
+a real, separate, larger change (it would need the whole roster's carry
+state as a new input) for a benefit that is only ever "don't
+occasionally waste one RNG roll," and a case co-op already produces
+today. Any presenter-layer UI for carried blueprints — none exists for
+the single-slot version either (confirmed by grep: no reference to
+`carriedBlueprint`/`blueprintDrop`/`blueprintLost` anywhere in
+`80-view.js` or `95-app.js` outside the F12 line; the only presenter
+consumer of any blueprint event is `85-audio.js`'s `blueprintUnlocked`
+cue, which still fires once per unlock exactly as before), so this stays
+a pure sim-layer change. A real player-facing purchase trigger (shop/hub
+UI) — the already-named gap every D8 purchase shares.
 
 ---
 
