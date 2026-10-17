@@ -90,6 +90,7 @@ echo
 
 echo "-- sim -----------------------------------------------------------------"
 run_suite verify_arch
+run_suite verify_hash
 run_suite verify_core
 run_suite verify_move
 run_suite verify_rig

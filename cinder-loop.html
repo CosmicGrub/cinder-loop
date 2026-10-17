@@ -6929,6 +6929,13 @@ Sim.prototype.hash = function () {
     this.tube ? this.tube[0] : -1, this.tube ? this.tube[1] : -1,
     this.bossTarget ? this.bossTarget.id : -1,
     this.runEndFrames,
+    // D14's once-per-room latch on the 'checkpoint' event (and the heal it
+    // gates). NOT a re-derivation of anything else: the condition that arms
+    // it (roster cleared) stays true for the rest of the room, so once fired
+    // this bit is the only record that it did. Found by tests/verify_hash.js
+    // (2026-10), which perturbs every live field and reports what hash()
+    // ignores.
+    this._checkpointFired ? 1 : 0,
     // Meta progression (65-meta.js). All four affect FUTURE ticks: currency
     // decides what a later spend can afford, maxHpBonus decides a later
     // reset's maxHp, enforceLocks/unlocked together decide whether a later
@@ -6976,10 +6983,21 @@ Sim.prototype.hash = function () {
       p.wallJumpLock === undefined ? 0 : p.wallJumpLock,
       p.ledgeGrabLock === undefined ? 0 : p.ledgeGrabLock,
       p.ledgeHang === undefined ? 0 : p.ledgeHang,
+      // Where a hang is anchored. While hanging, the NEXT tick re-pins b.x/b.y
+      // from these (30-player.js), so they decide future positions — hashed
+      // directly under this file's own "don't trust it's re-derivable" bar.
+      p.ledgeRow === undefined ? 0 : p.ledgeRow,
+      p.ledgeWallTx === undefined ? 0 : p.ledgeWallTx,
+      p.ledgeDir === undefined ? 0 : p.ledgeDir,
       p.maxHp === undefined ? 0 : p.maxHp,
       p.stats ? p.stats.ember : 0, p.stats ? p.stats.umbral : 0, p.stats ? p.stats.verdant : 0,
       b.x, b.y, b.w, b.h, b.vx, b.vy,
-      b.onGround ? 1 : 0, b.onCeiling ? 1 : 0, b.onWall, b.dropThrough
+      b.onGround ? 1 : 0, b.onCeiling ? 1 : 0, b.onWall, b.dropThrough,
+      // D17's roll wall-leniency (25-body.js). leaveRow is the row the roll
+      // DEPARTED from — not recoverable from the body's current position once
+      // it has fallen during the roll — and it decides which wall tiles the
+      // next moveX ignores.
+      b.wallLeniency ? 1 : 0, b.leaveRow === undefined ? -1 : b.leaveRow
     );
   }
   for (i = 0; i < this.targets.length; i++) {
@@ -7006,12 +7024,25 @@ Sim.prototype.hash = function () {
       // directly rather than trust it's re-derivable" bar this.tube/
       // meta.lastWeapon already hold to above.
       t.summonsUsed === undefined ? 0 : t.summonsUsed,
-      b.x, b.y, b.vx, b.vy, b.onGround ? 1 : 0
+      // Carried state the 2026-10 coverage test (tests/verify_hash.js) found
+      // unhashed. wander is the patrol heading and persists across attacks
+      // (45-enemy.js patrol() reads it back every tick); hits is the
+      // per-swing dedupe list that decides whether a swing may hit again;
+      // _zoneTiles are the boss's currently-stamped vent hazards, the one
+      // place a target mutates the shared World, and the list is the only
+      // record of which tiles to clear later; onWall is read straight back
+      // by patrol and by Emberrush's charge on the following tick.
+      t.wander === undefined ? 0 : t.wander,
+      t.hits ? t.hits.length : 0,
+      t._zoneTiles ? t._zoneTiles.join(';') : '-',
+      b.x, b.y, b.vx, b.vy, b.onGround ? 1 : 0, b.onWall
     );
   }
   for (i = 0; i < this.shots.length; i++) {
     t = this.shots[i]; b = t.body;
-    out.push(t.id, t.life, b.x, b.y, b.vx, b.vy);
+    // done: Combat.resolveBox sets it AFTER this tick's prune (a parried/
+    // reflected shot), so it can survive a tick boundary as true.
+    out.push(t.id, t.life, t.done ? 1 : 0, b.x, b.y, b.vx, b.vy);
   }
   for (i = 0; i < this.pickups.length; i++) {
     out.push(this.pickups[i].id, this.pickups[i].collected ? 1 : 0);
