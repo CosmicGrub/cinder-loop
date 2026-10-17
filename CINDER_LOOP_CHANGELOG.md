@@ -5,6 +5,80 @@ Newest first. Companion to `CINDER_LOOP_MASTERFILE.md` and
 
 ---
 
+## v0.2.26 — 2026-10-17 — Gate quality: a load-proof render suite, one shared fixture, and a suite that proves hash() sees everything
+
+**GREEN: 3421/3421 assertions across 19 suites** (a new `verify_hash` suite;
+`verify_render` 151 to 153), `cinder-loop.html` at 476,573 bytes. Three
+commits plus this doc sync, all follow-ups to the 2026-09-06 roadmap audit's
+test-tooling and architecture findings (#4.24, #4.23, #5.31). No gameplay
+behaviour changes anywhere: the only `src/` edit is `Sim.prototype.hash()`,
+which changes fingerprint strings and nothing the player can see.
+
+**`verify_render` no longer goes red under load (#4.24).** Two unrelated
+full-gate runs went red in one session on different assertions, each passing
+151/151 standalone moments later. The cause was two separate things. Every
+wait ceiling was a wall-clock number sized for a healthy box: a keystroke
+that should move the character 20px moved 6px inside a 2000ms window. Each
+ceiling is now multiplied by `TIMEOUT_SCALE` (default 4, overridable with
+`CINDER_RENDER_TIMEOUT_SCALE`), which costs nothing when a wait succeeds.
+And two narrative assertions ("nothing showing yet on a quiet boot", "the
+narrative PRNG is seeded from the real boot seed") read live state a second
+or two into a running level, by which time a real enemy could legitimately
+telegraph, set a bark and advance the PRNG. They now read a snapshot a setter
+on `window.CINDER_APP` takes the instant `boot()` returns, before any frame
+can run a tick. Every remaining guessed sleep (resize, pause and resume,
+touch-emulation settle, six 150ms post-boot settles, the 16ms polling loops,
+the pause-corner holds) became a poll on the condition its assertion actually
+depends on. The paused-sim check also now requires several more frames drawn
+while the tick stays frozen, so it can no longer pass vacuously on a starved
+box. Measured A/B with all 24 cores saturated, six runs each: the original
+failed once (a third, different timing assertion), the hardened suite passed
+all six.
+
+**One `fresh()`, not four (#4.23).** `verify_move`, `verify_enemy`,
+`verify_stats` and `verify_combat` each carried a byte-identical private copy
+of the scenario-plus-settle helper, the exact "one sibling patched, others
+missed" shape this changelog has fixed twice before for `attemptHop` and
+`realKill`. `H.fresh()` in `harness.js` owns it now; each file keeps a
+one-line local alias so no call site changed. Assertion counts identical.
+
+**`verify_hash`: a test that makes a silently un-hashed field fail in the
+commit that adds it (#5.31).** `Sim.prototype.hash()` is a hand-maintained
+~120-line list in a different file from every class it fingerprints, and had
+already produced one real gap (D16's `summonsUsed`, found only by an
+adversarial pass). The audit proposed co-locating each class's field list;
+this is the safer half of that advice, a test, and it needed no second copy
+of the list. For every own field of a live player, enemy, boss, Caller,
+dummy, projectile, pickup and the Sim, it perturbs the value and asks the
+REAL `hash()` whether it noticed. A primitive the hash ignores needs a
+written reason in the rules table; an exemption on a field that IS hashed
+is flagged as stale so exemptions cannot rot into a lie; arrays and nullable
+objects need a mutator that proves the hash moves. It also plants a new
+field, an undecided structured field, a stale exemption and a do-nothing
+mutator and requires each to be reported, so the detector provably can fail.
+
+Run against the old `hash()`, it named eleven carried-state fields nobody
+had fingerprinted: enemy `wander` (patrol heading, which persists across
+attacks), `hits` (the per-swing dedupe list), `_zoneTiles` (the boss's
+currently stamped vent hazards, the one place a target mutates the shared
+World) and every target body's `onWall`; `Sim._checkpointFired` (the
+once-per-room latch whose arming condition stays true, so nothing else
+records that it fired); the three ledge-hang anchors, which the next tick
+re-pins the body from; D17's `wallLeniency` and `leaveRow`, the latter being
+the roll's departure row and unrecoverable from the body's current position;
+and a consumed shot's `done` flag, which Combat sets after the tick's prune
+so it survives a tick boundary. All eleven are fingerprinted now. These were
+latent coverage gaps, not demonstrated desyncs: nothing in the suites ever
+diverged on one of them.
+
+**Docs brought back in line.** The gate sections of the masterfile and the
+visual map had drifted by many versions (`verify_run` documented at 118
+against a real 647, `verify_meta` at 265 against 451) and had never listed
+`verify_build`, `verify_hash` or `verify_caller` at all. All nineteen suites
+now carry their real counts.
+
+---
+
 ## v0.2.25 — 2026-09-06 — Dominance Breakpoints (D19), plus three more cheap audit fixes
 
 **GREEN: 3354/3354 assertions across 18 suites** (`verify_stats` grew from

@@ -887,12 +887,20 @@ than assumed away.
 
 ## 4. The gate
 
-One command: `tests/run_all.sh`. **2262 assertions across 16 suites**, plus
+One command: `tests/run_all.sh`. **3421 assertions across 19 suites**, plus
 the build itself, which now includes a `node --check` syntax pass over the
 fully assembled script (§4a explains why that exists). `VERBOSE=1` prints
 every assertion; failures always print.
 
-- **verify_arch (215)** — sim purity in a bare sandbox with no browser globals
+- **verify_build (18)** — `build.py`'s own failure paths, exercised for real
+  against throwaway copies of the project (v0.2.24, the 2026-09-06 audit):
+  a banned token (`Math.random`, `fetch` plus a URL) fails the build with the
+  right message; a missing REQUIRED module, an unbalanced brace (the
+  `node --check` pass), a stray extra module and a duplicate numeric prefix
+  each fail loudly; and a direct check that `REQUIRED` matches the real
+  `src/*.js` set exactly, which is what exposed `56-caller.js` missing since
+  D16. The only suite that shells out to a second language.
+- **verify_arch (239)** — sim purity in a bare sandbox with no browser globals
   and a `Math.random` that throws; no browser globals, `Math.random` or `dt` in
   any sim module (source-scanned with comments stripped, so prose about a
   banned identifier is not a use of it); the presenter never assigns sim state;
@@ -921,11 +929,21 @@ every assertion; failures always print.
   since it only ever exercises the airborne path) and a real running
   sequence proven to produce finite footstep-dust particles (the `step`
   emit's own sibling NaN bug, finding 12 — see §5p) — +8. 215 total.
-- **verify_core (55)** — RNG determinism, per-instance divergence, snapshot
+- **verify_hash (65)** — `Sim.prototype.hash()` covers every piece of live
+  state, or says in writing why not (v0.2.26). For every own field of a live
+  player, enemy, boss, Caller, dummy, projectile, pickup and the Sim, it
+  perturbs the value and asks the REAL `hash()` whether it noticed. An
+  unexplained miss, an exemption on a field that is actually hashed, and a
+  structured field (array, nullable object) with no decision all fail by
+  name; it also plants each of those mistakes to prove it can fail. Its first
+  run found eleven carried-state fields the hash ignored (enemy `wander`,
+  `hits`, `_zoneTiles` and `onWall`; `Sim._checkpointFired`; the three ledge
+  anchors; D17's `wallLeniency`/`leaveRow`; a consumed shot's `done`).
+- **verify_core (53)** — RNG determinism, per-instance divergence, snapshot
   restore, range and NaN sweeps; bus semantics, typed rejection and listener
   isolation; world queries, out-of-bounds rules, half-open spans and text
   round-trip; config sanity; sim determinism over 600 ticks.
-- **verify_move (202)** — every movement mechanic MEASURED, not asserted from
+- **verify_move (239)** — every movement mechanic MEASURED, not asserted from
   the config. Includes a 1200-tick stress run over a world with every tile
   kind asserting the body never ends a tick overlapping a solid tile. Since
   v0.2.8, also wall interaction (§3): a grounded press next to a wall is an
@@ -1014,7 +1032,7 @@ every assertion; failures always print.
   weapon-scaling proven through a raised stat, the one-tick `slamLanded`
   flag proven not to re-fire, i-frames respected, and determinism over 200
   ticks including a real landed slam.
-- **verify_stats (41, D2)** — the stat contract, driven through real
+- **verify_stats (82, D2)** — the stat contract, driven through real
   `gainStat`/`pickStatColour`/`Combat.weaponScale` calls and, for pickup
   collection, real sim ticks: a tie is proven NOT dominant, only a strict
   overtake is; the pickup-weighting formula proven statistically (3000 real
@@ -1069,7 +1087,13 @@ every path that never presses parry — +47. 132 total.
   `recover` and is still eligible for a boss phase-transition check
   afterward — proving stagger routes through the EXISTING branching
   rather than a parallel path built just for it — +4. 73 total.
-- **verify_gen (56, D3/D3a)** — four layers, cheapest and most isolated
+- **verify_caller (86, D16)** — the Caller and the summon primitive, mirroring
+  verify_boss's shape at smaller scale: kept OUT of `DATA.ENEMIES`, its full
+  state path, the fairness rule, `callIn()` actually spawning, `summonMax` as a
+  lifetime cap, no id collision, roster/currency exclusion, determinism,
+  terrain-safe spawn placement, two-player fairness, and the summoned add being
+  a real, fully functional enemy.
+- **verify_gen (79, D3/D3a)** — four layers, cheapest and most isolated
   first. The pure capability model (`maxGapForRise`/`gapBetween`/
   `edgeAllowed`) against hand-derived boundaries, including genuine
   directional asymmetry (climbing 2 tiles across a gap that only fits the
@@ -1097,7 +1121,7 @@ every path that never presses parry — +47. 132 total.
   one lands: **174/174 real generated edges physically confirmed**, 6
   zero-gap edges correctly out of scope. Found the rise-5 double-jump floor
   bug documented in §3.
-- **verify_run (118, D1, new suite v0.2.13)** — two layers matching
+- **verify_run (647, D1, new suite v0.2.13)** — two layers matching
   `verify_gen`'s own precedent: pure `RunLogic` logic (seeding, `isLevelClear`,
   `reachedExit`, the D8 currency/spend stub, `placeEnemies`) against
   hand-built fixtures first, real `Sim`/`Player`/`Enemy` integration second
@@ -1131,7 +1155,7 @@ every path that never presses parry — +47. 132 total.
   proven reset to the D2 baseline at a real run boundary; 500 consecutive
   derived levels from four starting seeds are swept and proven to never
   repeat — six real bugs the pass found, all fixed, full account in §5l.
-- **verify_meta (265, D4/D8, new suite v0.2.14)** — two layers matching
+- **verify_meta (451, D4/D8, new suite v0.2.14)** — two layers matching
   `verify_run`'s own precedent: pure `MetaLogic` logic (`sanitize` across
   nineteen corrupted-payload shapes, `serialize`/`deserialize` round-trips,
   `isUnlocked` under both Stage-1-default and enforced modes,
@@ -1177,7 +1201,7 @@ every path that never presses parry — +47. 132 total.
   double purchase, live-tops-up every currently-alive player additively
   without disturbing a freshly-reset player's own baseline, and each
   flips `hash()` — +74. 265 total.
-- **verify_narrative (65, D11/D12, new suite v0.2.15)** — pure trigger logic
+- **verify_narrative (76, D11/D12, new suite v0.2.15)** — pure trigger logic
   against hand-built fake sim fixtures (L8 — a plain object shaped like
   `{run, players, exit, bossTarget, bus}` is exactly as valid an argument
   as a real `Sim` here, since `Narrative` only ever reads these fields).
@@ -1208,7 +1232,7 @@ every path that never presses parry — +47. 132 total.
   sub-floor dimensions never produce a negative panel width or an
   off-canvas panel — five real bugs the pass found, all fixed, full
   account in §5n.
-- **verify_audio (338, D11, new suite v0.2.16)** — pure logic against a
+- **verify_audio (468, D11, new suite v0.2.16)** — pure logic against a
   hand-built fake `AudioContext` (L8), never a real one, never `window`.
   The SFX content table's own shape (10-data.js): every cue is a valid
   `tone`/`noise` with sane freq/dur/gain/delay/sweepTo/filterFreq bounds,
@@ -1240,7 +1264,7 @@ every path that never presses parry — +47. 132 total.
   (D13, §5p): the two new `dashStart`/`parry` cues proven against the
   content table's own shape and fired end to end against the fake ctx
   the identical way every pre-existing cue already is — +35. 338 total.
-- **verify_platform (207)** — the settings sanitizer and the pause menu, both
+- **verify_platform (210)** — the settings sanitizer and the pause menu, both
   pure and both tested against the REAL functions (L8), never a
   reimplementation. Every shape a corrupted or hand-edited localStorage
   payload could take (wrong type, wrong version, punctuation in a key code, an
@@ -1287,7 +1311,7 @@ every path that never presses parry — +47. 132 total.
   from a loop key; a dedicated regression test drives an actual `touchmove`
   through a promoted ghost and checks the pad responds, not just that the
   promotion field looks right.
-- **verify_render (145)** — real headless Chromium over CDP with **zero npm
+- **verify_render (153)** — real headless Chromium over CDP with **zero npm
   dependencies** (Node's global WebSocket, Playwright's cached browser): the
   canvas is laid out and not 0×0, the spawn is a finite coordinate, the player
   is standing, the sim ticks in real time, keystrokes move the character, the
@@ -1390,6 +1414,24 @@ every path that never presses parry — +47. 132 total.
   a real late player — fixed with a bounded real-retry (up to three
   attempts) around the whole jump-then-roll-press sequence, rather than
   loosening the buffer window itself. Full account in §5p findings 12-13.
+  **Since v0.2.26 (the 2026-09-06 audit's #4.24):** a second hardening pass.
+  Two unrelated gate runs went red in one session on different assertions
+  while the same suite passed 151/151 standalone seconds later. Two causes:
+  every wait ceiling was a wall-clock number too small for a starved box
+  (a keystroke that moved 6px in a 2s window), now multiplied by
+  `TIMEOUT_SCALE` (default 4, `CINDER_RENDER_TIMEOUT_SCALE` overrides) so a
+  passing wait still costs only its real latency; and the "quiet boot" and
+  "boot-seed" narrative assertions raced live enemy AI (a real enemy could
+  telegraph, set a bark and advance the PRNG before they read), now read a
+  snapshot a setter on `window.CINDER_APP` takes the instant `boot()` returns,
+  before any frame can tick. Every remaining guessed sleep (resize, pause and
+  resume, touch-emulation settle, the 150ms post-boot settles, the 16ms x30
+  polling loops, the pause-corner holds) became a poll on the condition its
+  assertion depends on; the paused-sim check now also requires several more
+  frames drawn while the tick stays frozen, so it cannot pass vacuously on a
+  starved box. Measured A/B under full 24-core CPU saturation, 6 runs each:
+  the original failed 1 of 6, the hardened version passed 6 of 6. +2
+  assertions.
 
 ---
 
@@ -1519,7 +1561,23 @@ guard against a stray file joining the build (reproduced directly — a
 leftover copy built and shipped with zero warning) or two files sharing a
 numeric prefix; fixing the first guard also caught a second, real,
 pre-existing gap — `56-caller.js` (D16) had never been added to
-`build.py`'s own `REQUIRED` list at all. **Since v0.2.25:** Dominance
+`build.py`'s own `REQUIRED` list at all. **Since v0.2.26:** three
+gate-quality fixes from the same audit, none touching gameplay.
+`verify_render` was hardened against CPU load (its wait ceilings scale, its
+boot-state narrative checks no longer race live enemy AI, every guessed sleep
+became a condition poll; measured 6/6 versus the original's 5/6 under full
+CPU saturation). The byte-identical `fresh()` fixture helper copied across
+four test files now lives once in `harness.js`. And a new suite,
+`verify_hash`, perturbs every live field of a player, enemy, boss, Caller,
+shot, pickup and the Sim and asks the real `hash()` whether it noticed —
+which on its first run found eleven carried-state fields the hash ignored
+(enemy `wander`, `hits`, `_zoneTiles` and `onWall`; `Sim._checkpointFired`;
+the three ledge-hang anchors; D17's roll wall-leniency fields; a consumed
+shot's `done` flag), all now fingerprinted. No gameplay behaviour changes,
+only fingerprint strings. The gate-section counts in this file and the
+visual map, stale by several versions, were brought back to the real 3421
+across 19 suites, with entries added for the three suites they had never
+listed (`verify_build`, `verify_hash`, `verify_caller`). **Since v0.2.25:** Dominance
 Breakpoints (D19) — three always-on passives (shorter Dash cooldown,
 wider Parry window, shorter Roll cooldown) fire whenever the matching
 D2 stat colour is currently the sole dominant one, generalizing

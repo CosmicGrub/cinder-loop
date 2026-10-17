@@ -118,7 +118,7 @@
 <header>
   <h1>CINDER LOOP</h1>
   <div class="sub">Visual map &middot; companion to CINDER_LOOP_MASTERFILE.md and CINDER_LOOP_CHANGELOG.md</div>
-  <div class="status">v0.2.25 &middot; 2026-09-06 &middot; GREEN 3354/3354 &middot; Dominance Breakpoints &mdash; dominantColour() drives shorter Dash/Roll cooldowns + a wider Parry window (D19)</div>
+  <div class="status">v0.2.26 &middot; 2026-10-17 &middot; GREEN 3421/3421 &middot; Gate quality &mdash; a load-proof render suite, one shared fixture, verify_hash proves hash() sees all live state</div>
 </header>
 
 <h2>Module stack &mdash; strict one-way dependency</h2>
@@ -137,7 +137,7 @@
   <div class="row"><span class="file">56-caller.js</span><span class="what">the Caller &mdash; elite 'summon' template, kept OUT of DATA.ENEMIES the same way Kilnwarden is (D16)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">60-run.js</span><span class="what">run loop: spawn &rarr; clear &rarr; boss &rarr; death &rarr; spend &rarr; respawn (D1), room chain: roomIndex + deriveRoomSeed (D14), pickRoomComposition/pickDistinct &mdash; placeEnemies takes optional roomIndex (D27)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">65-meta.js</span><span class="what">persistence, blueprints, +max HP capability unlock (D4/D8), four Dash/Parry enhancement flags (D13), lastWeapon (D15), backpackSlot flag + spendOnBackpackSlot (D24)</span><span class="tag">BUILT</span></div>
-  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16), _buildCheckpointAlcove stops at TILE.HAZARD (D17), _blueprintCapacity + buyBackpackSlot, per-item hand-in/blueprintLost + order-sensitive carriedBlueprints in hash() (D24), _enterRoom passes roomIndex into placeEnemies (D27)</span><span class="tag">BUILT</span></div>
+  <div class="row"><span class="file">70-sim.js</span><span class="what">Sim.step() &mdash; THE tick loop; owns everything above, D2 pickups too, buyDashExtraCharge/buyDashExtIframes/buyParryRiposte/buyParryReflect (D13), _enterRoom/_onRoomClear/checkpoint alcove + tube (D14), switchWeapon/cycleWeapon + step's own phase 0 (D15), ctx.addEnemy + ctx.rectSolid + summonsUsed in hash() (D16), _buildCheckpointAlcove stops at TILE.HAZARD (D17), _blueprintCapacity + buyBackpackSlot, per-item hand-in/blueprintLost + order-sensitive carriedBlueprints in hash() (D24), _enterRoom passes roomIndex into placeEnemies (D27), hash() fingerprints eleven more carried-state fields: enemy wander/hits/_zoneTiles/onWall, _checkpointFired, ledge anchors, wallLeniency/leaveRow, Shot.done (v0.2.26)</span><span class="tag">BUILT</span></div>
   <div class="boundary"><span>PRESENTER BOUNDARY &mdash; L5</span><i>.</i><span>nothing above may know anything below</span></div>
   <div class="row"><span class="file">80-view.js</span><span class="what">the ONLY place an event becomes an effect: renderer, camera rig, particles, dashStart/parry bursts + per-player parryGlow (D13), parryStart/ledgeGrab/ledgeClimb/ledgeRelease/statGain/blueprintDrop particle handlers (2026-09-06)</span><span class="tag">BUILT</span></div>
   <div class="row"><span class="file">82-narrative.js</span><span class="what">dialogue trigger + text-box render, off the DIALOGUE table (D11/D12), 'checkpoint' subscription (D21)</span><span class="tag">BUILT</span></div>
@@ -151,8 +151,13 @@
 <h2>The gate &mdash; tests/run_all.sh</h2>
 <div class="grid">
   <div class="card">
+    <h3>verify_build</h3>
+    <div class="n">18</div>
+    <p>build.py's own failure paths against throwaway copies of the project: banned tokens, a missing or stray or duplicate-prefix module, an unbalanced brace, and REQUIRED matching the real src/ set exactly. The only suite that shells out to a second language.</p>
+  </div>
+  <div class="card">
     <h3>verify_arch</h3>
-    <div class="n">215</div>
+    <div class="n">239</div>
     <p>Sim purity in a bare sandbox. No browser globals, Math.random or dt in
        any sim module. The presenter never assigns sim state. 900 ticks with
        and without a presenter are byte-identical. Hitstop does not eat input.
@@ -162,8 +167,13 @@
        particles &mdash; two sibling NaN-particle regressions.</p>
   </div>
   <div class="card">
+    <h3>verify_hash</h3>
+    <div class="n">65</div>
+    <p>Sim.hash() covers every piece of live state or says why not. Perturbs every field of a live player, enemy, boss, Caller, shot, pickup and the Sim and asks the real hash() whether it noticed. Unexplained misses, stale exemptions and undecided structured fields fail by name; plants its own mistakes to prove it can fail. First run found eleven un-hashed fields.</p>
+  </div>
+  <div class="card">
     <h3>verify_core</h3>
-    <div class="n">55</div>
+    <div class="n">53</div>
     <p>RNG determinism, per-instance divergence, snapshot restore. Bus
        semantics, typed rejection, listener isolation. World queries,
        out-of-bounds rules, half-open spans, text round-trip. Config sanity.
@@ -171,7 +181,7 @@
   </div>
   <div class="card">
     <h3>verify_move</h3>
-    <div class="n">202</div>
+    <div class="n">239</div>
     <p>Every movement mechanic measured by driving the sim, never recomputed
        from CFG. Plus a 1200-tick stress run asserting the body never ends a
        tick inside a solid tile. Since v0.2.8: wall slide clamps to exactly
@@ -248,7 +258,7 @@
   </div>
   <div class="card">
     <h3>verify_stats</h3>
-    <div class="n">41</div>
+    <div class="n">82</div>
     <p>D2's stat contract measured against the real sim, not re-derived.
        Dominance proven strict: catching up to exactly tie the leader
        grants no HP, only overtaking it does. pickStatColour's weighting
@@ -295,8 +305,13 @@
        eligible for a boss phase-transition check afterward.</p>
   </div>
   <div class="card">
+    <h3>verify_caller</h3>
+    <div class="n">86</div>
+    <p>The Caller and the summon primitive (D16): kept out of DATA.ENEMIES, its state path, callIn(), the lifetime summon cap, terrain-safe placement, two-player fairness.</p>
+  </div>
+  <div class="card">
     <h3>verify_gen</h3>
-    <div class="n">56</div>
+    <div class="n">79</div>
     <p>The capability model, the DIRECTED reachability graph/BFS, the audit,
        and the generator itself, then the strongest claim in the suite: a
        real physics prover attempts every edge the audit calls legal in an
@@ -308,7 +323,7 @@
   </div>
   <div class="card">
     <h3>verify_run</h3>
-    <div class="n">118</div>
+    <div class="n">647</div>
     <p>D1, new suite v0.2.13. Two layers matching verify_gen's own precedent:
        pure RunLogic first, real Sim/Player/Enemy integration second &mdash;
        proving 70-sim.js actually wires the pure logic in, not just that it
@@ -324,7 +339,7 @@
   </div>
   <div class="card">
     <h3>verify_meta</h3>
-    <div class="n">265</div>
+    <div class="n">451</div>
     <p>D4/D8, new suite v0.2.14. Pure MetaLogic first, real Sim/Player
        integration second. buyMaxHp() refuses when unaffordable, grows hp
        AND maxHp immediately, stacks, survives a real beginRun() restart;
@@ -340,7 +355,7 @@
   </div>
   <div class="card">
     <h3>verify_narrative</h3>
-    <div class="n">65</div>
+    <div class="n">76</div>
     <p>D11/D12, new suite v0.2.15. Pure trigger logic against a hand-built
        fake sim fixture (L8). Every narrator pool and every enemy's bark
        pool non-empty; the FIRST boss entry fires the reveal and flips
@@ -352,7 +367,7 @@
   </div>
   <div class="card">
     <h3>verify_audio</h3>
-    <div class="n">338</div>
+    <div class="n">468</div>
     <p>D11, new suite v0.2.16. Pure logic against a hand-built fake
        AudioContext (L8), never a real one. Every SFX cue's shape proven;
        every real Bus event outside the curated trigger list proven silent.
@@ -365,7 +380,7 @@
   </div>
   <div class="card">
     <h3>verify_platform</h3>
-    <div class="n">207</div>
+    <div class="n">210</div>
     <p>The settings sanitizer and pause menu, tested against the real
        functions, never reimplemented. Every corrupted-payload shape a hand-
        edited localStorage value could take. The two-pass keybind-collision
@@ -388,7 +403,7 @@
   </div>
   <div class="card">
     <h3>verify_render</h3>
-    <div class="n">145</div>
+    <div class="n">153</div>
     <p>Real headless Chromium over raw CDP, zero npm dependencies. Canvas laid
        out, sim ticking in real time, keystrokes moving the character, a swing
        taking exactly the documented damage off a dummy, the pause menu
