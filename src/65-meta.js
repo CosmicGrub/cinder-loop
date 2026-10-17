@@ -54,6 +54,12 @@ function Meta() {
                                // accumulates within a session; this file's only
                                // new contribution is making it survive a reload
   this.unlocked = {};         // weaponId -> true, meaningful only once enforceLocks is true
+  // D15 (weapon equip & switch): which WEAPONS id a fresh reset applies
+  // (see 70-sim.js's own _applyMetaToPlayer). Defaults to 'blade' — the
+  // same default resetTransient() already uses, so a first boot needs no
+  // migration. Updated by Sim.prototype.switchWeapon the instant player 0
+  // explicitly switches (design spec §3) — not a run-end snapshot.
+  this.lastWeapon = 'blade';
   this.maxHpBonus = 0;        // permanent +max HP, stacked one META_MAXHP_GAIN at a time
   this.enforceLocks = CFG.META_ENFORCE_LOCKS_DEFAULT;   // D4's own "debug-room toggle"
   // Ability enhancements (abilities spec §4) — four independent flat-cost
@@ -64,6 +70,10 @@ function Meta() {
   this.dashExtIframes = false;
   this.parryRiposte = false;
   this.parryReflect = false;
+  // D24: the backpack slot — a fifth flat-cost boolean of the exact same
+  // shape. Raises blueprint carry capacity 1 -> 2 (70-sim.js's own
+  // _blueprintCapacity reads it fresh at every drop, never snapshotted).
+  this.backpackSlot = false;
 }
 
 function isPlainObject(v) {
@@ -100,6 +110,7 @@ function sanitize(raw) {
   if (typeof raw.dashExtIframes === 'boolean') out.dashExtIframes = raw.dashExtIframes;
   if (typeof raw.parryRiposte === 'boolean') out.parryRiposte = raw.parryRiposte;
   if (typeof raw.parryReflect === 'boolean') out.parryReflect = raw.parryReflect;
+  if (typeof raw.backpackSlot === 'boolean') out.backpackSlot = raw.backpackSlot;
 
   if (isPlainObject(raw.unlocked)) {
     var ids = C.DATA.WEAPON_IDS, i;
@@ -107,6 +118,9 @@ function sanitize(raw) {
       if (raw.unlocked[ids[i]] === true) out.unlocked[ids[i]] = true;
     }
   }
+  // D15: the same "validate against DATA.WEAPON_IDS, fall back to the
+  // safe default otherwise" pattern `unlocked` above already uses.
+  if (C.DATA.WEAPON_IDS.indexOf(raw.lastWeapon) !== -1) out.lastWeapon = raw.lastWeapon;
   return out;
 }
 
@@ -197,6 +211,10 @@ function spendOnParryRiposte(currency) {
 function spendOnParryReflect(currency) {
   return C.RunLogic.spend(currency, CFG.META_PARRY_REFLECT_COST);
 }
+// D24: the backpack slot, same shape as the four above.
+function spendOnBackpackSlot(currency) {
+  return C.RunLogic.spend(currency, CFG.META_BACKPACK_SLOT_COST);
+}
 
 C.Meta = Meta;
 C.MetaLogic = {
@@ -211,7 +229,8 @@ C.MetaLogic = {
   spendOnDashExtraCharge: spendOnDashExtraCharge,
   spendOnDashExtIframes: spendOnDashExtIframes,
   spendOnParryRiposte: spendOnParryRiposte,
-  spendOnParryReflect: spendOnParryReflect
+  spendOnParryReflect: spendOnParryReflect,
+  spendOnBackpackSlot: spendOnBackpackSlot
 };
 
 })(CINDER);

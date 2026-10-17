@@ -79,8 +79,30 @@ var TRIGGERS = [
   // cue of its own, the same as rollEnd's own precedent (not in this list
   // either) — only the START of a committed burst reads as a real,
   // distinct moment worth a sound.
-  'dashStart', 'parry'
+  'dashStart', 'parry',
+  // 2026-09-06 audit: six real events that fired silently since each one's
+  // own feature shipped — see each SFX entry's own comment (10-data.js) for
+  // why. ledgeRelease is deliberately NOT here, matching crouch/uncrouch/
+  // wallTouch's own established "visual-only, no dedicated sound" shape.
+  'parryStart', 'ledgeGrab', 'ledgeClimb', 'statGain', 'blueprintDrop', 'blueprintLost'
 ];
+
+// 2026-09-06 audit (#3.20): DATA.SFX_IDS mirrors the validated-key-list
+// convention DATA.ENEMY_IDS/WEAPON_IDS use, but had zero production
+// consumer — this hand-typed TRIGGERS array was never actually
+// cross-checked against it, so a future typo here (a cue defined in
+// 10-data.js but never wired, or a stale name left behind after a
+// rename) would silently drop a sound with no error anywhere. Checked
+// once at module load, not per-instance — both arrays are static.
+(function assertTriggersAreRealSfxIds() {
+  var ids = C.DATA.SFX_IDS, i, missing = [];
+  for (i = 0; i < TRIGGERS.length; i++) {
+    if (ids.indexOf(TRIGGERS[i]) === -1) missing.push(TRIGGERS[i]);
+  }
+  if (missing.length) {
+    throw new Error('85-audio.js TRIGGERS names a cue not in DATA.SFX_IDS: ' + missing.join(', '));
+  }
+})();
 
 // Adversarially found (v0.2.16): the idempotency guard used to be keyed
 // purely on "have I ever subscribed", not "am I already subscribed to

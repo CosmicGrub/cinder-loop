@@ -18,11 +18,7 @@ const CFG = H.loadSim().CFG;
 
 const REST = 586;
 
-function fresh(spec) {
-  const a = H.scenario(spec);
-  a.settle();
-  return a;
-}
+const fresh = H.fresh;   // shared definition lives in harness.js
 
 /* ===================================================== horizontal motion */
 {
@@ -659,6 +655,195 @@ function windowFor(button, event, make) {
   s.eq('a roll one frame early is refused', b.count('rollStart'), 0);
 }
 
+/* ================================================ roll wall-leniency (D17)
+ * A flat-rise gap the same shape 50-gen.js's own hazard beats stamp: a
+ * single-row platform (not flatWorld's own 2-row floor), a HAZARD strip
+ * filling the gap at that same row, a single-row platform resuming on the
+ * far side. Verified empirically (outside this file, before this code
+ * existed) that WITHOUT this leniency, moveX finds the far platform's own
+ * solid tile at the shared row and blocks the roll as a wall before moveY
+ * ever gets a chance to land it — see the D17 spec's own §1a for the full
+ * account. These tests prove the fix, scoped exactly as narrowly as
+ * designed: only the row a roll departed from, only for the roll's own
+ * duration, nothing else. */
+function hazardGapWorld(C, gapX0, gapWidth, farWall) {
+  const w = 60, h = 30, ROW = 20;
+  const W = new C.World(w, h);
+  for (let x = 1; x < gapX0; x++) W.set(x, ROW, C.TILE.SOLID);
+  for (let x = gapX0; x < gapX0 + gapWidth; x++) W.set(x, ROW, C.TILE.HAZARD);
+  for (let x = gapX0 + gapWidth; x < w - 1; x++) W.set(x, ROW, C.TILE.SOLID);
+  if (farWall) {
+    // A genuine multi-row wall well past the far platform — the leniency
+    // must never let a roll clip through THIS, only its own departure row.
+    for (let y = ROW - 3; y <= ROW; y++) W.set(gapX0 + gapWidth + 10, y, C.TILE.SOLID);
+  }
+  for (let y = 0; y < h; y++) { W.set(0, y, C.TILE.SOLID); W.set(w - 1, y, C.TILE.SOLID); }
+  return W;
+}
+const GAP_ROW_Y = 20 * 16;
+function gapScenario(gapX0, gapWidth, farWall) {
+  const a = H.scenario({
+    world: (C) => hazardGapWorld(C, gapX0, gapWidth, farWall),
+    spawns: [[(gapX0 - 1) * 16 + 2, GAP_ROW_Y - CFG.PLAYER_H]]
+  });
+  a.settle();
+  return a;
+}
+{
+  // The real case: a 4-tile flat-rise gap (GEN_ROLL_HAZARD_TILES), crossed
+  // by a real roll, lands cleanly on the far platform with no damage taken
+  // — i-frames cover the hazard overlap the crossing necessarily passes
+  // through, the same "prove it the way a player would find out" style the
+  // spike-strip test above already uses.
+  const a = gapScenario(10, 4);
+  s.eq('starts grounded on the near platform', a.b().onGround, true);
+  a.hold('right').step(1).release('right');
+  a.clearLog();
+  a.tap('roll');
+  s.eq('the roll begins', a.p().state, 'roll');
+  s.ok('the leniency arms on the departure row', a.b().wallLeniency);
+  s.eq('leaveRow is the row it was standing on', a.b().leaveRow, 20);
+
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  // let it finish settling onto the far side
+  let g2 = 0;
+  while (!a.b().onGround && g2++ < 60) a.step(1);
+
+  s.ok('crossed onto the far platform', a.b().x > (10 + 4) * 16, 'x ' + Math.round(a.b().x));
+  s.near('landed flush on the far platform\'s own row', a.b().y, GAP_ROW_Y - CFG.PLAYER_H, 0.001);
+  // (the actual "never blocked as a wall" evidence is the position checks
+  // just above — a genuine wall-block would pin the roll at the near edge
+  // of the gap, well short of "crossed onto the far platform")
+  s.eq('and took no damage crossing the hazard strip', a.p().hp, CFG.MAX_HP);
+  s.ok('the leniency disarms once the roll ends', !a.b().wallLeniency);
+  s.eq('leaveRow resets too', a.b().leaveRow, -1);
+}
+{
+  // The negative case: a walk (not a roll) across the exact same gap never
+  // lands — confirms Roll is genuinely the differentiator, not merely "any
+  // fall happens to work here."
+  const a = gapScenario(10, 4);
+  a.hold('right');
+  let g = 0, fellIn = false;
+  while (g++ < 200 && !fellIn) {
+    a.step(1);
+    if (a.world.rectHazard(a.b().x, a.b().y, a.b().w, a.b().h) && a.p().hp < CFG.MAX_HP) fellIn = true;
+  }
+  s.ok('walking the same gap without rolling takes hazard damage instead of crossing it', fellIn);
+}
+{
+  // The named regression: a genuine multi-row wall further down the SAME
+  // path (well past the far platform) must still block normally — the
+  // leniency is scoped to exactly one row, never a real wall's other rows.
+  const a = gapScenario(10, 4, /* farWall */ true);
+  a.hold('right').step(1).release('right');
+  a.tap('roll');
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  let g2 = 0;
+  while (!a.b().onGround && g2++ < 60) a.step(1);
+  s.ok('landed on the far platform first', a.b().x > (10 + 4) * 16);
+
+  a.clearLog();
+  a.hold('right');
+  let g3 = 0, blocked = false;
+  while (g3++ < 300) {
+    a.step(1);
+    if (a.b().onWall !== 0) { blocked = true; break; }
+  }
+  s.ok('a genuine multi-row wall further down the path still blocks normally', blocked);
+}
+{
+  // The exemption expires with the roll — armed on flat, unbroken ground
+  // (never actually leaves solid support, so leaveRow is set but never
+  // needed), then once endRoll has fired, a later WALK into a wall placed
+  // at that exact same row must block normally, not pass through on a
+  // stale exemption.
+  const flatRoll = (C) => {
+    const W = H.flatWorld(C, 120, 40);
+    for (let y = 36; y <= 38; y++) W.set(60, y, C.TILE.SOLID);   // a real wall, well past the roll
+    return W;
+  };
+  const a = H.scenario({ world: flatRoll });
+  a.settle();
+  a.hold('right').step(1).release('right');
+  a.tap('roll');
+  s.ok('leniency armed for the roll', a.b().wallLeniency);
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  s.ok('leniency disarmed the instant the roll ends', !a.b().wallLeniency);
+  s.eq('leaveRow cleared too', a.b().leaveRow, -1);
+
+  a.clearLog();
+  a.hold('right');
+  let g2 = 0, blocked = false;
+  while (g2++ < 400) {
+    a.step(1);
+    if (a.b().onWall !== 0) { blocked = true; break; }
+  }
+  s.ok('walking into a wall at the old departure row, after the roll ended, still blocks', blocked);
+}
+{
+  // resetTransient() (L10) clears both new fields — Body is mutated in
+  // place across lives, never reconstructed, so a stale exemption could in
+  // principle survive a death/respawn mid-roll if this were missed.
+  const a = gapScenario(10, 4);
+  a.hold('right').step(1).release('right');
+  a.tap('roll');
+  s.ok('armed mid-roll, ahead of the reset', a.b().wallLeniency);
+  a.p().resetTransient();
+  s.eq('wallLeniency is cleared by resetTransient()', a.b().wallLeniency, false);
+  s.eq('leaveRow is cleared too', a.b().leaveRow, -1);
+}
+{
+  // Enemies never set these fields — no 'roll'/'dash' state exists in
+  // 45-enemy.js, so an Enemy's own Body must simply carry the same inert
+  // defaults every other non-rolling body does.
+  const a = H.scenario({ enemies: [['ashwalker', 200, REST]] });
+  a.settle();
+  const enemyBody = a.sim.targets[a.sim.targets.length - 1].body;
+  s.eq('an enemy body never has wallLeniency armed', enemyBody.wallLeniency, false);
+  s.eq('or a leaveRow set', enemyBody.leaveRow, -1);
+}
+{
+  // Adversarially found: neither test above (the "genuine multi-row wall"
+  // regression, nor "exemption expires") ever actually encounters a wall
+  // WHILE wallLeniency is armed — both place their wall well past the
+  // roll's own fixed travel range, so the row-SCOPING guarantee itself
+  // (only ty === leaveRow, not every row a rolling body's hitbox happens to
+  // touch) was never exercised: a regression to `if (body.wallLeniency)
+  // continue;` in 25-body.js (exempting EVERY row, not just leaveRow) would
+  // have shipped green through this entire file. Confirmed directly against
+  // that exact mutation before writing this: both assertions below flip to
+  // failing.
+  //
+  // Driven against the real Body/moveX/World machinery directly (no Player
+  // state machine) rather than a full roll — traced separately that a
+  // rolling body's crouched hitbox only sinks a full extra tile below
+  // leaveRow right at the very end of its own ~18-frame budget, if at all,
+  // which makes constructing a reliable Player-driven integration case for
+  // this exact boundary fragile; this proves the mechanism's own row
+  // scoping instead, the same "drive Body directly" approach "collision
+  // never leaks" already uses further down this file.
+  const C = H.loadSim();
+  const rowWorld = new C.World(20, 10);
+  rowWorld.set(8, 5, C.TILE.SOLID);
+  rowWorld.set(8, 6, C.TILE.SOLID);
+
+  function driveRow(bodyRow, leaveRow) {
+    const b = new C.Body(5 * 16, bodyRow * 16, CFG.PLAYER_W, CFG.PLAYER_CROUCH_H);
+    b.wallLeniency = true; b.leaveRow = leaveRow; b.vx = 4.75;
+    let everBlocked = false;
+    for (let t = 0; t < 12; t++) { b.move(rowWorld); if (b.onWall !== 0) everBlocked = true; }
+    return everBlocked;
+  }
+
+  s.ok('the exemption lets a body pass a wall on its own leaveRow', !driveRow(5, 5));
+  s.ok('but rejects a wall one row below leaveRow', driveRow(6, 5));
+  s.ok('and rejects a wall one row above leaveRow', driveRow(5, 6));
+}
+
 /* ============================================================ ember dash
  * Airborne reuse of the Roll button (abilities spec §2a) — same
  * measured-not-recomputed discipline as roll above (L8).
@@ -1052,6 +1237,163 @@ function windowFor(button, event, make) {
   s.eq('parry cancels the in-flight swing', a.p().attack, null);
   s.eq('attackCancel is emitted', a.count('attackCancel'), 1);
   s.eq('and still arms the window the same tick', a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
+}
+
+/* =================================================== dominance breakpoints
+ * (D19). Three passives, one per D2 stat colour, each modifying one D13
+ * ability whenever dominantColour(stats) reads that colour — checked
+ * fresh at the moment of the effect, never snapshotted (spec §3). Stats
+ * are set directly on the player rather than routed through real
+ * pickups — the same division of labor the dash-enhancement section
+ * above and verify_stats.js's own weapon-scaling tests already use: this
+ * file's job is proving what dominance actually changes about movement,
+ * not re-proving gainStat/pickStatColour/dominantColour itself, which
+ * verify_stats.js already owns.
+ */
+{
+  // Ember dominant shortens Ember Dash's own cooldown.
+  const a = fresh();
+  a.p().stats.ember = CFG.STAT_START + 5;   // sole leader, strictly dominant
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');   // roll while airborne = dash
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('ember dominance shortens the dash cooldown',
+    a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION);
+
+  // Without ember dominant (a tie, the default fresh stats), the ordinary
+  // cooldown applies.
+  const b = fresh();
+  b.hold('jump').step(1).release('jump');
+  let h = 0;
+  while (b.b().onGround && h++ < 30) b.step(1);
+  b.tap('roll');
+  let h2 = 0;
+  while (b.count('dashEnd') === 0 && h2++ < 60) b.step(1);
+  s.eq('without ember dominance, the ordinary dash cooldown applies', b.p().dashCd, CFG.DASH_COOLDOWN_FRAMES);
+}
+{
+  // A DIFFERENT colour dominant (not ember) still gets the base dash
+  // cooldown — proving this checks specifically for 'ember', not "any
+  // dominance at all".
+  const a = fresh();
+  a.p().stats.umbral = CFG.STAT_START + 5;
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('umbral dominance does not touch the dash cooldown', a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES);
+}
+{
+  // Verdant dominant shortens Roll's own cooldown.
+  const a = fresh();
+  a.p().stats.verdant = CFG.STAT_START + 5;
+  a.hold('roll').step(1).release('roll');
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  s.eq('verdant dominance shortens the roll cooldown',
+    a.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION);
+
+  const b = fresh();
+  b.hold('roll').step(1).release('roll');
+  let h = 0;
+  while (b.count('rollEnd') === 0 && h++ < 60) b.step(1);
+  s.eq('without verdant dominance, the ordinary roll cooldown applies', b.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES);
+}
+{
+  // Umbral dominant widens the parry window itself, at the moment of the
+  // press.
+  const a = fresh();
+  a.p().stats.umbral = CFG.STAT_START + 5;
+  a.tap('parry');
+  s.eq('umbral dominance widens the parry window',
+    a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES + CFG.DOMINANCE_PARRY_WINDOW_BONUS);
+
+  const b = fresh();
+  b.tap('parry');
+  s.eq('without umbral dominance, the ordinary parry window applies', b.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
+}
+{
+  // A tie (no dominant colour at all) gets every ability's ordinary base
+  // value — dominantColour returns null on a tie, and null !== any real
+  // colour name, so this falls through to the base case for free; worth
+  // its own assertion rather than assuming the string-mismatch logic
+  // generalizes.
+  const a = fresh();
+  a.p().stats.ember = a.p().stats.umbral = a.p().stats.verdant = CFG.STAT_START + 5;
+  a.tap('parry');
+  s.eq('a three-way tie gets the ordinary parry window', a.p().parryWindow, CFG.PARRY_WINDOW_FRAMES);
+}
+{
+  // Mid-run colour shift, DURING an in-flight roll: dominance changing
+  // strictly AFTER the trigger tick and strictly BEFORE the end tick must
+  // still be reflected in that SAME roll's own ending cooldown — proving
+  // endRoll reads dominantColour() fresh at the moment it fires, never
+  // snapshotted back at roll-entry (spec §3's own "checked fresh, not
+  // snapshotted" rule).
+  //
+  // An earlier version of this test mutated stats only AFTER the first
+  // roll had already fully ended, then triggered a brand-new SECOND roll
+  // once dominance was already set — caught by an adversarial review pass
+  // as a real test gap: that sequence cannot distinguish "checked fresh
+  // at exit" from "cached once at entry", since by the time any roll's
+  // own trigger tick runs, dominance is already whatever it is going to
+  // be for that roll's whole duration either way. Only a mutation landing
+  // strictly BETWEEN one roll's own trigger and its own end can tell the
+  // two implementations apart, so that is what this drives.
+  const a = fresh();
+  a.hold('roll').step(1).release('roll');
+  s.eq('the roll begins with no dominance yet', a.p().state, 'roll');
+  a.p().stats.verdant += 10;   // mutated strictly mid-roll, before endRoll fires
+  let g = 0;
+  while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+  s.eq('the SAME roll ends with the shortened cooldown, proving endRoll reads dominance fresh at exit',
+    a.p().rollCd, CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION);
+}
+{
+  // No interaction with existing D13 enhancements (spec §5): owning Dash
+  // Extended I-Frames alongside ember dominance still produces BOTH the
+  // enhancement's own residual iframes AND the dominance-shortened
+  // cooldown, neither overriding the other.
+  const a = fresh();
+  a.p().dashExtIframes = true;
+  a.p().stats.ember = CFG.STAT_START + 5;
+  a.hold('jump').step(1).release('jump');
+  let g = 0;
+  while (a.b().onGround && g++ < 30) a.step(1);
+  a.tap('roll');
+  let g2 = 0;
+  while (a.count('dashEnd') === 0 && g2++ < 60) a.step(1);
+  s.eq('the D13 enhancement\'s own residual iframes still fires', a.p().iframes, CFG.DASH_EXT_IFRAMES_BONUS);
+  s.eq('and the D19 dominance-shortened cooldown still applies, independently',
+    a.p().dashCd, CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION);
+}
+{
+  // Determinism (L4): a scripted stat-shift -> dominance-change -> real
+  // ability sequence hashes byte-identical across two runs from the same
+  // seed. dominantColour() consumes no RNG of its own — it is a pure
+  // function of the already-hashed stats field, so this is a confirming
+  // check rather than new hash-surface, but worth proving directly
+  // rather than assumed (spec's own §7, last bullet).
+  function run() {
+    const a = H.scenario({ seed: 23, log: false });
+    a.settle();
+    a.p().stats.verdant += 3;   // now dominant
+    a.hold('roll').step(1).release('roll');
+    let g = 0;
+    while (a.count('rollEnd') === 0 && g++ < 60) a.step(1);
+    a.step(30);
+    a.tap('parry');
+    a.step(30);
+    return a;
+  }
+  const r1 = run(), r2 = run();
+  s.ok('a dominance-shift-and-ability sequence is deterministic (L4)',
+    r1.sim.hash() === r2.sim.hash(), 'seed 23');
 }
 
 /* =============================================================== crouch */

@@ -34,8 +34,17 @@ const read = (c, sid, expr) => cdp.evaluate(c, sid, expr);
 // ORIGINAL fixed sleeps at boot (900ms) and post-keydown (80ms) genuinely
 // flaky under load: 5 of 6 runs failed 'the presenter is drawing frames' or
 // 'the attack key starts a swing' outright, not a hypothetical risk.
+//
+// 2026-10 hardening: every timeout below is multiplied by TIMEOUT_SCALE. A
+// wait that succeeds costs only its real latency, so a generous ceiling is
+// free on a healthy box and the difference between a pass and a spurious red
+// on a loaded one — two unrelated gate runs went red in one session on
+// 2000ms/1500ms ceilings (a keystroke that moved 6px in 2s of starved
+// wall-clock), while the same suite passed 151/151 standalone seconds later.
+// Override with CINDER_RENDER_TIMEOUT_SCALE.
+const TIMEOUT_SCALE = Number(process.env.CINDER_RENDER_TIMEOUT_SCALE) || 4;
 async function waitForCondition(c, sid, expr, timeoutMs) {
-  const deadline = Date.now() + (timeoutMs || 4000);
+  const deadline = Date.now() + (timeoutMs || 4000) * TIMEOUT_SCALE;
   while (Date.now() < deadline) {
     const ok = await read(c, sid, expr);
     if (ok) return true;
@@ -45,6 +54,12 @@ async function waitForCondition(c, sid, expr, timeoutMs) {
 }
 async function waitForBoot(c, sid, timeoutMs) {
   return waitForCondition(c, sid, '!!(window.CINDER_APP && window.CINDER_APP.sim)', timeoutMs);
+}
+// Replaces the old `await cdp.sleep(150)  // one settled frame past first
+// paint`: wait for frames actually drawn, not for a guessed duration.
+async function waitForFrames(c, sid, n, timeoutMs) {
+  return waitForCondition(c, sid,
+    '!!(window.CINDER_APP && window.CINDER_APP.frames > ' + (n || 2) + ')', timeoutMs || 4000);
 }
 
 async function main() {
@@ -89,6 +104,35 @@ async function main() {
           window.__audioNodeCalls.buf++;
           return origBufSrc.apply(this, arguments);
         };
+      })()`
+    }, sid);
+
+    // A deterministic "pristine boot" snapshot. 95-app.js assigns
+    // window.CINDER_APP exactly once, synchronously, from boot() — before any
+    // requestAnimationFrame callback can run a single sim tick. A setter on
+    // that property therefore observes the Narrative instance in the exact
+    // state boot() left it, with no wall-clock race. The previous version read
+    // narrative.current / narrative.rng.s a second or two into the run, by
+    // which time a REAL enemy in the live level could legitimately have
+    // telegraphed, set a bark, and advanced the PRNG — two assertions (quiet
+    // boot, boot-seed) went red together for that one cause.
+    await client.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(function () {
+        var app;
+        Object.defineProperty(window, 'CINDER_APP', {
+          configurable: true,
+          get: function () { return app; },
+          set: function (v) {
+            app = v;
+            try {
+              window.__bootSnapshot = {
+                narrCurrent: v.narrative.current === null ? null : 'non-null',
+                narrRngS: v.narrative.rng.s,
+                simSeedDerived: (v.sim.seed >>> 0) || 1
+              };
+            } catch (e) { window.__bootSnapshot = { error: String(e) }; }
+          }
+        });
       })()`
     }, sid);
 
@@ -175,9 +219,12 @@ async function main() {
 
     /* ------------------------------------------------- ticking in real time */
     const t0 = await read(client, sid, 'window.CINDER_APP.sim.tick');
+    const wall0 = Date.now();
     await cdp.sleep(1000);
     const t1 = await read(client, sid, 'window.CINDER_APP.sim.tick');
-    const rate = t1 - t0;
+    // Divided by the REAL elapsed time: a sleep(1000) that actually took 1.4s
+    // under load would otherwise inflate the apparent rate past the band.
+    const rate = (t1 - t0) / Math.max(0.5, (Date.now() - wall0) / 1000);
     // A wide band on purpose. This asserts the loop is live and roughly
     // real-time, not that a CI box can hold a perfect 60 — that number is the
     // frame meter's job on real hardware, and it is not measurable from here.
@@ -233,26 +280,23 @@ async function main() {
      * is proving NARRATIVE's reaction and rendering, not enemy timing,
      * which verify_enemy.js already covers on its own; the bus instance
      * emitted on here is the identical one a real telegraph would use. */
-    const narrBefore = await read(client, sid, `(function () {
-      var n = window.CINDER_APP.narrative;
-      return { exists: !!n, current: n.current };
-    })()`);
-    s.ok('window.CINDER_APP.narrative exists', narrBefore.exists);
-    s.eq('nothing showing yet on a quiet boot', narrBefore.current, null);
+    const bootSnap = await read(client, sid, 'window.__bootSnapshot');
+    s.ok('window.CINDER_APP.narrative exists',
+      await read(client, sid, '!!window.CINDER_APP.narrative'));
+    s.ok('the pristine-boot snapshot was captured without error', bootSnap && !bootSnap.error,
+      JSON.stringify(bootSnap));
+    s.eq('nothing showing yet on a quiet boot', bootSnap && bootSnap.narrCurrent, null);
 
     // Regression (adversarial pass): the real boot() call site must
     // actually pass a real, varying seed to Narrative, not silently fall
     // back to the class's own hardcoded default (1) forever — the bug
     // that made every real boot, ever, produce byte-identical dialogue.
-    // Checked BEFORE anything triggers a real dialogue pick — rng.s is the
-    // PRNG's own live, mutating state, advanced by every pick() call, so
-    // this has to run against the pristine, just-constructed instance.
-    const seedCheck = await read(client, sid, `(function () {
-      var simSeed = (window.CINDER_APP.sim.seed >>> 0) || 1;
-      return { narrRngS: window.CINDER_APP.narrative.rng.s, simSeedDerived: simSeed };
-    })()`);
+    // Checked against the setter-trap snapshot taken at the instant
+    // boot() returned — rng.s is the PRNG's own live, mutating state,
+    // advanced by every pick() call, so it must be read from the pristine,
+    // just-constructed instance, never a second or two into a live level.
     s.eq('narrative.rng is seeded from the real boot seed, not the class default',
-      seedCheck.narrRngS, seedCheck.simSeedDerived);
+      bootSnap && bootSnap.narrRngS, bootSnap && bootSnap.simSeedDerived);
 
     await read(client, sid,
       "window.CINDER_APP.sim.bus.emit('telegraph', { id: 999, tid: 'ashwalker', frames: 20, x: 0, y: 0, facing: 1 })");
@@ -289,7 +333,9 @@ async function main() {
       return true;
     })()`);
     await cdp.keyDown(client, sid, 'Space');
-    await cdp.sleep(400);
+    // Condition, not a guessed 400ms: the screenshot below is only "moving"
+    // once the character has actually left the ground.
+    await waitForCondition(client, sid, 'window.__y0 - window.CINDER_APP.sim.players[0].body.y > 8', 2000);
     const shotMoving = await cdp.screenshot(client, sid, SHOT);
     await cdp.keyUp(client, sid, 'Space');
     // Real condition again: the sampler above already runs continuously off
@@ -376,7 +422,7 @@ async function main() {
     // Leave the menu closed, exactly as the pause section below expects to find it.
     await cdp.keyDown(client, sid, 'Escape'); await cdp.keyUp(client, sid, 'Escape');   // options -> root
     await cdp.keyDown(client, sid, 'Escape'); await cdp.keyUp(client, sid, 'Escape');   // root -> closed
-    await cdp.sleep(60);
+    await waitForCondition(client, sid, '!window.CINDER_APP.paused', 1000);
     const menuClosedAfterAudio = await read(client, sid, `(function () {
       var a = window.CINDER_APP;
       return { paused: a.paused, screen: a.menu.screen };
@@ -454,7 +500,10 @@ async function main() {
       // waitForCondition) that happened to cover this same requirement
       // without ever stating it as one — this is the first press dispatched
       // back-to-back with nothing else in between, which is what surfaced it.
-      await cdp.sleep(50);
+      // The hold is a CONDITION now (the tick-sampled pad reports the button
+      // down), not a guessed 50ms: the press has to be visible to a real sim
+      // tick before it is released, and this proves exactly that.
+      await waitForCondition(client, sid, 'window.CINDER_APP.sim.pads.get(0).cur.roll', 1000);
       await cdp.keyUp(client, sid, 'ShiftLeft');
       await cdp.keyUp(client, sid, 'Space');
       // Checking live state === 'dash' alone is racy in a way a flat sleep
@@ -497,7 +546,8 @@ async function main() {
     // Let a few real frames render, and confirm the SAME live timer actually
     // decays — not just that it was set once, which render()'s own
     // decrement loop (not this test) is responsible for.
-    await cdp.sleep(200);
+    await waitForCondition(client, sid,
+      'window.CINDER_APP.view.parryGlow[' + playerId0 + '] < ' + glowAfter, 2000);
     const glowLater = await read(client, sid, 'window.CINDER_APP.view.parryGlow[' + playerId0 + ']');
     s.ok('the glow timer decays over real rendered frames, not stuck held',
       glowLater < glowAfter, glowAfter + ' -> ' + glowLater);
@@ -516,7 +566,7 @@ async function main() {
     const beforePause = await read(client, sid, 'window.CINDER_APP.sim.tick');
     await cdp.keyDown(client, sid, 'Escape');
     await cdp.keyUp(client, sid, 'Escape');
-    await cdp.sleep(60);
+    await waitForCondition(client, sid, 'window.CINDER_APP.paused', 1000);
     const pausedState = await read(client, sid, `(function () {
       var a = window.CINDER_APP;
       return { paused: a.paused, menuOpen: a.menu.open, screen: a.menu.screen };
@@ -526,8 +576,15 @@ async function main() {
     s.eq('landing on the root screen', pausedState.screen, 'root');
 
     const tPausedStart = await read(client, sid, 'window.CINDER_APP.sim.tick');
-    await cdp.sleep(400);
+    const framesPausedStart = await read(client, sid, 'window.CINDER_APP.frames');
+    // Wait until the render loop has demonstrably drawn several MORE frames,
+    // then check the tick stayed put. A flat 400ms sleep could pass
+    // vacuously on a starved box (no frames, so no ticks either way); this
+    // can only pass if the loop was alive AND the sim genuinely did not step.
+    const loopAliveWhilePaused = await waitForCondition(client, sid,
+      'window.CINDER_APP.frames > ' + (framesPausedStart + 8), 3000);
     const tPausedEnd = await read(client, sid, 'window.CINDER_APP.sim.tick');
+    s.ok('the render loop kept drawing frames while paused', loopAliveWhilePaused);
     s.eq('the sim does not advance while paused', tPausedEnd, tPausedStart);
 
     const shotPaused = await cdp.screenshot(client, sid);
@@ -545,11 +602,11 @@ async function main() {
     s.eq('Escape from Options returns to root, not closing outright', backAtRoot, 'root');
 
     await cdp.keyDown(client, sid, 'Escape'); await cdp.keyUp(client, sid, 'Escape');
-    await cdp.sleep(60);
+    await waitForCondition(client, sid, '!window.CINDER_APP.paused', 1000);
     const resumed = await read(client, sid, 'window.CINDER_APP.paused');
     s.eq('Escape at root closes the menu and resumes', resumed, false);
 
-    await cdp.sleep(200);
+    await waitForCondition(client, sid, 'window.CINDER_APP.sim.tick > ' + tPausedEnd, 2000);
     const tAfterResume = await read(client, sid, 'window.CINDER_APP.sim.tick');
     s.ok('the sim resumes advancing after unpausing', tAfterResume > tPausedEnd,
       tPausedEnd + ' -> ' + tAfterResume);
@@ -561,7 +618,13 @@ async function main() {
     async function metricsCheck(label, width, height, dsf) {
       await client.send('Emulation.setDeviceMetricsOverride',
         { width: width, height: height, deviceScaleFactor: dsf || 1, mobile: false }, sid);
-      await cdp.sleep(220);
+      // Condition: the app's own logical size has caught up with this
+      // override (the same floor-clamp fit() applies), not a guessed 220ms.
+      await waitForCondition(client, sid, `(function () {
+        var v = window.CINDER_APP.view;
+        return v.cssW === ${Math.max(320, width)} && v.cssH === ${Math.max(240, height)} &&
+               v.canvas.clientWidth === ${width} && v.canvas.clientHeight === ${height};
+      })()`, 2000);
       const m = await read(client, sid, `(function () {
         var v = window.CINDER_APP.view;
         return { cssW: v.cssW, cssH: v.cssH, dpr: v.dpr, bw: v.canvas.width, bh: v.canvas.height,
@@ -608,7 +671,10 @@ async function main() {
       hiDpr.bw, Math.round(hiDpr.cssW * 2));
 
     await client.send('Emulation.clearDeviceMetricsOverride', {}, sid);
-    await cdp.sleep(250);
+    await waitForCondition(client, sid, `(function () {
+      var v = window.CINDER_APP.view, r = document.getElementById('game').getBoundingClientRect();
+      return v.cssW === Math.round(r.width) && v.cssH === Math.round(r.height);
+    })()`, 2000);
     const framesAfterResize = await read(client, sid, 'window.CINDER_APP.frames');
     s.ok('the app is still producing frames after the resize sweep', framesAfterResize > 0);
     // The regression check in reverse: after five overrides in a row, the
@@ -647,7 +713,7 @@ async function main() {
     await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
     const bootedCustom = await waitForBoot(client, sid);
     s.ok('the app reboots after a reload with a saved payload', bootedCustom);
-    await cdp.sleep(150);   // one settled frame past first paint
+    await waitForFrames(client, sid, 2);   // one settled frame past first paint
     const restored = await read(client, sid, `(function () {
       var s = window.CINDER_APP.settings;
       return { reducedMotion: s.reducedMotion, showMeter: s.showMeter, jump: s.keybinds.jump.join(',') };
@@ -663,7 +729,7 @@ async function main() {
     await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
     const bootedCorrupt = await waitForBoot(client, sid);
     s.ok('a corrupted settings payload does not prevent boot', bootedCorrupt);
-    await cdp.sleep(150);
+    await waitForFrames(client, sid, 2);
     const survived = await read(client, sid, `(function () {
       var a = window.CINDER_APP;
       return (a && a.sim) ? { booted: true, version: a.settings.version, hp: a.sim.players[0].hp } : { booted: false };
@@ -718,7 +784,7 @@ async function main() {
     await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
     const bootedAfterBuy = await waitForBoot(client, sid);
     s.ok('the app reboots after a reload following an F6 purchase', bootedAfterBuy);
-    await cdp.sleep(150);
+    await waitForFrames(client, sid, 2);
     const metaAfterReload = await read(client, sid, `(function () {
       var m = window.CINDER_APP.sim.meta;
       return { currency: m.currency, maxHpBonus: m.maxHpBonus, playerMaxHp: window.CINDER_APP.sim.players[0].maxHp };
@@ -726,6 +792,48 @@ async function main() {
     s.eq('the F6 purchase survives a real reload — currency', metaAfterReload.currency, 10000 - CFG.META_MAXHP_COST);
     s.eq('and the permanent bonus', metaAfterReload.maxHpBonus, 1);
     s.eq('and a freshly booted player actually reflects it', metaAfterReload.playerMaxHp, CFG.MAX_HP + 1);
+
+    // D15 (weapon equip & switch): switchWeapon is the FIRST real, non-
+    // debug-key player input that mutates permanent meta (meta.lastWeapon,
+    // via Sim.prototype.switchWeapon) — an adversarial pass found it had no
+    // matching save hook wired, the exact "mutated in memory but silently
+    // reverted by an ordinary reload" bug the F6 block above already
+    // documents and was fixed for once. Driven through the REAL KeyI key
+    // dispatch (05-input.js/90-settings.js's default binding), not a direct
+    // sim.switchWeapon() call, so this proves the actual player-facing
+    // input path, not just the underlying Sim method verify_meta.js already
+    // covers. Run while enforceLocks is still Stage 1's own default
+    // (false) — every weapon reads unlocked, so cycling needs no extra
+    // setup — deliberately BEFORE the F5 toggle below flips that.
+    // switchWeapon is Pad-routed (like jump/roll/attack/parry), not a raw
+    // synchronous e.code check the way F5/F6 are — the render loop needs
+    // to actually observe the press for at least one real tick before
+    // release, the same wait the KeyJ (attack) block above already needs.
+    await cdp.keyDown(client, sid, 'KeyI');
+    await waitForCondition(client, sid,
+      "window.CINDER_APP.sim.players[0].weapon !== 'blade'", 1000);
+    await cdp.keyUp(client, sid, 'KeyI');
+    const afterSwitch = await read(client, sid, `(function () {
+      var a = window.CINDER_APP;
+      var stored = JSON.parse(localStorage.getItem(${JSON.stringify(META_KEY)}));
+      return { weapon: a.sim.players[0].weapon, lastWeapon: a.sim.meta.lastWeapon,
+               storedLastWeapon: stored.lastWeapon };
+    })()`);
+    s.eq('KeyI actually cycles the real player\'s weapon', afterSwitch.weapon, 'daggers');
+    s.eq('and updates meta.lastWeapon immediately', afterSwitch.lastWeapon, 'daggers');
+    s.ok('and saves to localStorage immediately, not just on the next runEnd',
+      afterSwitch.storedLastWeapon === 'daggers', String(afterSwitch.storedLastWeapon));
+
+    await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
+    const bootedAfterSwitch = await waitForBoot(client, sid);
+    s.ok('the app reboots after a reload following a weapon switch', bootedAfterSwitch);
+    await waitForFrames(client, sid, 2);
+    const weaponAfterReload = await read(client, sid, `(function () {
+      var a = window.CINDER_APP;
+      return { lastWeapon: a.sim.meta.lastWeapon, playerWeapon: a.sim.players[0].weapon };
+    })()`);
+    s.eq('the weapon switch survives a real reload — meta.lastWeapon', weaponAfterReload.lastWeapon, 'daggers');
+    s.eq('and a freshly booted player actually starts on it', weaponAfterReload.playerWeapon, 'daggers');
 
     // F5 (toggleEnforceLocks) — the other debug-key mutation the same gap
     // affected — proven the identical way.
@@ -739,7 +847,7 @@ async function main() {
     s.eq('and saves the flip immediately', afterToggle.stored, true);
     await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
     await waitForBoot(client, sid);
-    await cdp.sleep(150);
+    await waitForFrames(client, sid, 2);
     s.eq('the F5 toggle survives a real reload',
       await read(client, sid, 'window.CINDER_APP.sim.meta.enforceLocks'), true);
 
@@ -748,7 +856,7 @@ async function main() {
     await cdp.navigate(client, sid, pathToFileURL(BUILD).href);
     const bootedCorruptMeta = await waitForBoot(client, sid);
     s.ok('a corrupted meta payload does not prevent boot', bootedCorruptMeta);
-    await cdp.sleep(150);
+    await waitForFrames(client, sid, 2);
     const survivedMeta = await read(client, sid, `(function () {
       var a = window.CINDER_APP;
       return (a && a.sim) ? { booted: true, currency: a.sim.meta.currency } : { booted: false };
@@ -807,7 +915,8 @@ async function main() {
     await client.send('Emulation.setDeviceMetricsOverride',
       { width: 390, height: 844, deviceScaleFactor: 3, mobile: true }, sid);
     await client.send('Emulation.setTouchEmulationEnabled', { enabled: true }, sid);
-    await cdp.sleep(280);
+    await waitForCondition(client, sid,
+      "window.CINDER_APP.touch() === true && document.getElementById('rotate').classList.contains('active')", 2000);
     const touchPortrait = await read(client, sid, `(function () {
       var r = document.getElementById('rotate');
       return { touch: window.CINDER_APP.touch(), active: r.classList.contains('active'),
@@ -819,7 +928,8 @@ async function main() {
 
     await client.send('Emulation.setDeviceMetricsOverride',
       { width: 844, height: 390, deviceScaleFactor: 3, mobile: true }, sid);
-    await cdp.sleep(280);
+    await waitForCondition(client, sid,
+      "!document.getElementById('rotate').classList.contains('active')", 2000);
     const touchLandscape = await read(client, sid, `(function () {
       var r = document.getElementById('rotate');
       return { touch: window.CINDER_APP.touch(), active: r.classList.contains('active') };
@@ -902,14 +1012,11 @@ async function main() {
 
     const groundedBeforeJump = await read(client, sid, 'window.CINDER_APP.sim.players[0].body.onGround');
     await cdp.touchStart(client, sid, [{ x: actionX, y: jumpY, id: 2 }]);
-    let midJump = { vy: 0 };
-    for (let i = 0; i < 30 && midJump.vy >= 0; i++) {
-      midJump = await read(client, sid, `(function () {
-        var p = window.CINDER_APP.sim.players[0];
-        return { state: p.state, vy: p.body.vy };
-      })()`);
-      if (midJump.vy >= 0) await cdp.sleep(16);
-    }
+    await waitForCondition(client, sid, 'window.CINDER_APP.sim.players[0].body.vy < 0', 2000);
+    const midJump = await read(client, sid, `(function () {
+      var p = window.CINDER_APP.sim.players[0];
+      return { state: p.state, vy: p.body.vy };
+    })()`);
     await cdp.touchEnd(client, sid, [{ x: actionX, y: jumpY, id: 2 }]);
     s.ok('a real dispatched tap in the jump band actually jumps',
       groundedBeforeJump && midJump.vy < 0, JSON.stringify(midJump));
@@ -926,25 +1033,21 @@ async function main() {
     // standalone and then flaked inside the full gate (more going on, more
     // scheduling jitter), which is exactly the failure mode polling for the
     // real observable state avoids.
-    await cdp.sleep(300);   // let any prior motion fully settle
+    // Condition, not a guessed 300ms: prior motion has fully settled.
+    await waitForCondition(client, sid,
+      'window.CINDER_APP.sim.players[0].body.onGround && Math.abs(window.CINDER_APP.sim.players[0].body.vx) < 0.05', 2000);
     await cdp.touchStart(client, sid, [{ x: moveX, y: 220, id: 3 }]);
     await cdp.touchMove(client, sid, [{ x: moveX, y: 220 + 40, id: 3 }]);   // drag down
-    let downSettled = false;
-    for (let i = 0; i < 30 && !downSettled; i++) {
-      downSettled = await read(client, sid, 'window.CINDER_APP.sim.pads.get(0).cur.down');
-      if (!downSettled) await cdp.sleep(16);
-    }
+    const downSettled = await waitForCondition(client, sid,
+      'window.CINDER_APP.sim.pads.get(0).cur.down', 1500);
     s.ok('the down-drag reaches pad.cur before the attack fires', downSettled);
 
     await cdp.touchStart(client, sid, [{ x: actionX, y: attackY, id: 4 }]);
-    let heavy = null;
-    for (let i = 0; i < 30 && heavy === null; i++) {
-      heavy = await read(client, sid, `(function () {
-        var p = window.CINDER_APP.sim.players[0];
-        return p.attack ? p.attack.id : null;
-      })()`);
-      if (heavy === null) await cdp.sleep(16);
-    }
+    await waitForCondition(client, sid, '!!window.CINDER_APP.sim.players[0].attack', 1500);
+    const heavy = await read(client, sid, `(function () {
+      var p = window.CINDER_APP.sim.players[0];
+      return p.attack ? p.attack.id : null;
+    })()`);
     await cdp.touchEnd(client, sid, [{ x: actionX, y: attackY, id: 4 }]);
     await cdp.touchEnd(client, sid, [{ x: moveX, y: 260, id: 3 }]);
     s.eq('two real simultaneous touches produce a real heavy attack', heavy, 'heavy');
@@ -980,11 +1083,8 @@ async function main() {
     await read(client, sid,
       "window.CINDER_APP.sim.bus.emit('telegraph', { id: 998, tid: 'ashwalker', frames: 20, x: 0, y: 0, facing: 1 })");
     await cdp.touchStart(client, sid, [{ x: actionX, y: rollY, id: 7 }]);
-    let parryArmed = false;
-    for (let i = 0; i < 30 && !parryArmed; i++) {
-      parryArmed = await read(client, sid, 'window.CINDER_APP.sim.pads.get(0).cur.parry');
-      if (!parryArmed) await cdp.sleep(16);
-    }
+    const parryArmed = await waitForCondition(client, sid,
+      'window.CINDER_APP.sim.pads.get(0).cur.parry', 1500);
     await cdp.touchEnd(client, sid, [{ x: actionX, y: rollY, id: 7 }]);
     s.ok('a real roll-zone touch, right after a real telegraph, really arms parry', parryArmed);
     // The staleness half (assist stops firing once the telegraph is no
@@ -1001,24 +1101,26 @@ async function main() {
     // arm), which the check above already does.
 
     // Pause corner, dispatched as a real touch rather than a keyboard Escape.
-    await cdp.sleep(200);
+    await waitForCondition(client, sid, '!window.CINDER_APP.paused', 1000);
     const pausedBefore = await read(client, sid, 'window.CINDER_APP.paused');
     s.eq('not paused yet', pausedBefore, false);
     await cdp.touchStart(client, sid, [{ x: geom.cssW - 15, y: 15, id: 5 }]);
-    await cdp.sleep(80);
+    // 94-touch.js opens/closes pause synchronously on touchstart, so the
+    // condition below is the real effect, not a guessed hold duration.
+    await waitForCondition(client, sid, 'window.CINDER_APP.paused', 1000);
     await cdp.touchEnd(client, sid, [{ x: geom.cssW - 15, y: 15, id: 5 }]);
     s.eq('tapping the pause corner with a real touch opens the menu',
       await read(client, sid, 'window.CINDER_APP.paused'), true);
     // Close it the same way, so emulation teardown below starts from a clean,
     // unpaused, un-held state.
     await cdp.touchStart(client, sid, [{ x: geom.cssW - 15, y: 15, id: 6 }]);
-    await cdp.sleep(60);
+    await waitForCondition(client, sid, '!window.CINDER_APP.paused', 1000);
     await cdp.touchEnd(client, sid, [{ x: geom.cssW - 15, y: 15, id: 6 }]);
     s.eq('tapping it again closes the menu', await read(client, sid, 'window.CINDER_APP.paused'), false);
 
     await client.send('Emulation.setTouchEmulationEnabled', { enabled: false }, sid);
     await client.send('Emulation.clearDeviceMetricsOverride', {}, sid);
-    await cdp.sleep(280);
+    await waitForCondition(client, sid, 'window.CINDER_APP.touch() === false', 2000);
     s.eq('reverting emulation returns app.touch() to false',
       await read(client, sid, 'window.CINDER_APP.touch()'), false);
 

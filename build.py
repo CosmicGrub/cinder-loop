@@ -43,6 +43,7 @@ REQUIRED = [
     "45-enemy.js",
     "50-gen.js",
     "55-boss.js",
+    "56-caller.js",
     "60-run.js",
     "65-meta.js",
     "70-sim.js",
@@ -208,6 +209,13 @@ def strip_comments(src):
     call. Failing the build on prose teaches people to stop writing prose.
     The `[^:]` guard keeps `https://` from being mistaken for a comment, so a
     real URL is still caught.
+
+    2026-09-06 audit (#4.27): tests/verify_arch.js's own `code()` helper
+    duplicates these same two regexes, independently hand-written in a
+    different language, for the identical reason (strip comments before a
+    banned-token scan). They can't be literally unified across Python/JS —
+    this comment (and its mirror in verify_arch.js) exists so an edit to
+    one doesn't silently drift from the other unnoticed.
     """
     src = re.sub(r"/\*[\s\S]*?\*/", " ", src)
     src = re.sub(r"(^|[^:])//[^\n]*", r"\1 ", src)
@@ -215,16 +223,37 @@ def strip_comments(src):
 
 
 def modules():
-    """Every .js in src/, ordered by its numeric prefix."""
+    """Every .js in src/, ordered by its numeric prefix.
+
+    Discovery is deliberately auto — no hand-maintained file list to forget
+    to update — but that means nothing else was ever checking that what
+    got discovered is what was MEANT to be there. Reproduced directly
+    (adversarial audit, 2026-09-06): copying an existing module to a stray
+    filename (e.g. `56-caller-old.js`) built and shipped with ZERO warning,
+    silently concatenated into the middle of the module chain purely
+    because '-' sorts before '.' in a filename tiebreak — the exact
+    "silently producing... the worst outcome" failure this file's own
+    module docstring already warns about, just from the opposite direction
+    (a bigger, contaminated build, not a smaller one). Two checks close it:
+    every discovered file must be a REQUIRED one (extras die loudly), and
+    no two files may share a numeric prefix (a real ambiguity `numbered.sort()`
+    would otherwise resolve silently by filename, not by anything meaningful).
+    """
     if not os.path.isdir(SRC):
         die("no src/ directory at %s" % SRC)
     found = [f for f in os.listdir(SRC) if f.endswith(".js")]
     numbered = []
+    seen_prefixes = {}
     for f in found:
         m = re.match(r"^(\d+)-", f)
         if not m:
             die("src/%s has no numeric prefix; module order would be undefined" % f)
-        numbered.append((int(m.group(1)), f))
+        prefix = int(m.group(1))
+        if prefix in seen_prefixes:
+            die("src/%s and src/%s share numeric prefix %d; module order would be undefined"
+                % (seen_prefixes[prefix], f, prefix))
+        seen_prefixes[prefix] = f
+        numbered.append((prefix, f))
     numbered.sort()
     return [f for _, f in numbered]
 
@@ -272,6 +301,13 @@ def main():
     missing = [f for f in REQUIRED if f not in order]
     if missing:
         die("missing required module(s): %s" % ", ".join(missing))
+
+    # The other half of the REQUIRED check — see modules()'s own comment.
+    # Missing-file was already guarded; present-but-unexpected never was.
+    extra = [f for f in order if f not in REQUIRED]
+    if extra:
+        die("unexpected module(s) not in REQUIRED: %s "
+            "(a stray/leftover file would otherwise build silently)" % ", ".join(extra))
 
     icon_uri = data_uri("image/svg+xml", ICON_SVG)
     manifest_uri = build_manifest(icon_uri)

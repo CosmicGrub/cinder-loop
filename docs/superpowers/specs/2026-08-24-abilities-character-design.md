@@ -1,8 +1,15 @@
 # Abilities and character rendering — Ember Dash, Parry, and the enhanced figure
 
-Status: design approved by user 2026-08-24. Character rendering (§5) is
-already implemented and shipped (`80-view.js`, gate green). Abilities
-(§1-4) are designed and approved but NOT yet implemented.
+Status: design approved by user 2026-08-24. Fully implemented as
+v0.2.17 (`02bb6cb`'s own doc-sync marks the shipped state; the
+implementation itself landed across the commits that sync amends),
+adversarially reviewed. Character rendering (§5) shipped first
+(`80-view.js`); Abilities (§1-4 — Roll, Ember Dash, Parry, and the
+four enhancement purchases) shipped in the same release. Note (2026-
+09-06 audit): base Parry does not negate ranged (`shoot`) damage at
+all until Parry Reflect is owned — §2b's generic "negates the damage
+of an incoming attack" wording predates this carve-out; see
+`40-combat.js:216-220`'s own comment for the real, narrower contract.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions),
 `2026-08-23-room-checkpoint-structure-design.md` (the cinders economy
 these enhancements connect to).
@@ -60,6 +67,21 @@ machinery: enemies already emit a real `telegraph` Bus event before
 they swing (45-enemy.js's own fairness-rule commit moment) — that is
 exactly the signal a parry window needs, and it already exists for
 narrative's own barks to react to.
+
+**Amended (2026-09-06 audit) — a real carve-out this generic wording
+left ambiguous, resolved unilaterally by the shipped code's own comment
+rather than by this spec.** "An incoming attack," unqualified, reads as
+covering every attack type. It doesn't: a projectile (`Shot`) has no
+`.stagger()` to call, so **base Parry is a complete no-op against ranged
+(`shoot`) attacks** — no negation, no stagger, full damage taken — until
+the player owns Parry Reflect (§4, below), which is what first makes a
+ranged attack parryable at all, not a bonus layered on top of an
+already-working ranged parry. Confirmed directly:
+`40-combat.js:216-220`'s own comment states this plainly ("a base parry
+does not negate ranged damage — that is Reflect's own job... not this
+one"). This carve-out should have been in the base ability's own
+definition from the start, not left for the implementation to discover
+and only ever document in a code comment.
 
 **Input: needs a genuinely new one.** Nothing in the current 7-action
 vocabulary (left/right/up/down/jump/roll/attack) has room to host Parry
@@ -162,7 +184,34 @@ Both cues are one Bus-trigger away from a real SFX cue too (`85-audio.js`'s
 existing 15-cue table, D11) — a dash whoosh and a parry clang, same shape
 as the cues already there, not scoped in detail here.
 
-## 7. Concrete file-level shape
+## 6a. Testing approach (L8 — exercise the real functions)
+
+**Retrofitted 2026-09-06** — this spec, one of the first two ever written
+for this project, shipped without a dedicated testing section; every
+spec written from the very next day onward has had one. Written after
+the fact, describing what `tests/verify_move.js`'s own Roll/Dash/Parry
+sections (and `tests/verify_combat.js`/`tests/verify_enemy.js` for the
+stagger-interruption half of §2b) actually cover:
+
+- Ember Dash: a real, driven i-frame window through its full committed
+  duration, the context-sensitive grounded-Roll-vs-airborne-Dash branch
+  on the shared input, and cooldown/distance measured from real ticks
+  (L8 — never recomputed from CFG and asserted equal to itself).
+- Parry: the timed window's real duration and cooldown, negation and
+  stagger against a real landed enemy attack, and — the section §2b
+  itself calls out as the riskiest piece — a real mid-telegraph/
+  mid-swing interruption actually stopping an enemy's own committed
+  attack, not merely flipping a flag with no observable consequence.
+- The base-Parry-vs-ranged carve-out named in §2b's own 2026-09-06
+  amendment: a parry timed against a real projectile takes full damage
+  without Parry Reflect owned, and negates/reflects correctly once it is.
+- The four flat-cost enhancement purchases (§4): each refuses when
+  unaffordable, succeeds and flips its own flag when exactly affordable,
+  refuses a second purchase outright, and survives a genuine run restart
+  — the same shared-shape integration test every subsequent D8-adjacent
+  purchase in this project now follows.
+- Determinism (L4): a scripted dash/parry/enhancement sequence hashes
+  byte-identical across two runs from the same seed.
 
 Implementation-plan-level detail, offered for scope estimation.
 

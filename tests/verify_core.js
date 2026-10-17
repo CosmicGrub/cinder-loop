@@ -161,9 +161,11 @@ const { RNG, Bus, World, CFG, TILE } = C;
 
 /* ------------------------------------------------------------------ CFG */
 {
+  // 2026-09-06 audit: CFG.TICK_HZ removed (dead — zero real consumer, see
+  // 00-core.js's own comment at DT's definition); this is the one direct
+  // check of the actual invariant now, not a cross-check between two
+  // constants that only ever agreed by construction.
   s.eq('tick is 1/60', CFG.DT, 1 / 60);
-  s.eq('tick hz is 60', CFG.TICK_HZ, 60);
-  s.ok('dt and hz agree', Math.abs(CFG.DT * CFG.TICK_HZ - 1) < 1e-12);
 
   const positive = ['TILE', 'PLAYER_W', 'PLAYER_H', 'RUN_SPEED', 'GRAVITY',
     'MAX_FALL', 'ROLL_FRAMES', 'ROLL_SPEED', 'ROLL_COOLDOWN_FRAMES',

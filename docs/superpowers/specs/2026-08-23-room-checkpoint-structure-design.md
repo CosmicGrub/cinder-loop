@@ -1,6 +1,11 @@
 # Room-based level structure, checkpoints, and cinder banking
 
-Status: design approved by user 2026-08-23, not yet implemented.
+Status: design approved by user 2026-08-23. Implemented as v0.2.18
+(`10f92ac`), adversarially reviewed. The cinder drop/carry/bank
+mechanic itself (spec sections on cinders) remains deferred — real
+and reserved (`CFG.CINDER_*`, three Bus events), not yet wired; see
+the masterfile's own honest-state section and the roadmap's "finish
+D14's cinder economy" entry for the current status of that half.
 Companion docs: `CINDER_LOOP_MASTERFILE.md` (D-series decisions), `CINDER_LOOP_CHANGELOG.md`.
 
 ## 1. Goal
@@ -209,6 +214,47 @@ module boundaries belong to the implementation plan, not this spec.
 No new enemy templates or weapons are required — room-to-room difficulty
 escalation reuses the existing 4-template roster via density/composition
 (§3), the same lever D2 already uses elsewhere.
+
+## 10a. Testing approach (L8 — exercise the real functions)
+
+**Retrofitted 2026-09-06** — this spec, one of the first two ever written
+for this project, shipped without a dedicated testing section; every
+spec written from the very next day onward has had one. Written after
+the fact, describing what the real shipped tests (`tests/verify_run.js`,
+`tests/verify_meta.js`) actually cover for the PARTS of this spec that
+shipped (the cinder drop/carry/bank mechanic itself, §8, remains
+deferred — see the Status line at the top of this file — so nothing
+below claims coverage for it):
+
+- Room chain: a full run advances through `CFG.ROOM_COUNT` rooms in
+  sequence before the boss room, each independently generated and
+  fairness-audited at room-scoped beat/pickup counts, confirmed via a
+  real multi-room clear-and-advance sequence (`H.clearRoomAndAdvance()`,
+  promoted to `tests/harness.js` specifically because more than one
+  suite needed the same "kill everything, walk to the door" sequence).
+- The checkpoint fires exactly on room-roster-clear, independent of
+  whether the player has reached the room's own exit yet — proven by
+  killing the roster while positioned away from the exit and confirming
+  the `'checkpoint'` event fires immediately, not on arrival.
+- `_healAtCheckpoint()`: heals a fraction of MISSING hp (never a flat
+  number, never over max), confirmed at multiple different current-hp
+  starting points.
+- Blueprint hand-in at every checkpoint, not only true run-end — the
+  same `_handInCarriedBlueprints()` helper fires at both call sites,
+  confirmed by carrying a blueprint into a mid-run checkpoint (not a
+  boss-victory run-end) and confirming it hands in there.
+- The checkpoint alcove (`_buildCheckpointAlcove()`) never newly blocks a
+  real physics path that was reachable before it was stamped, and never
+  overwrites another platform's own column into an accidental ceiling —
+  proven with real `H.attemptHop()`/`H.attemptRoll()` physics-driven
+  checks comparing reachability before and after the alcove is stamped,
+  across a real seed sweep, not merely asserted safe by construction.
+- Determinism (L4): a full multi-room clear-and-checkpoint sequence
+  hashes byte-identical across two runs from the same seed.
+- Explicitly NOT covered here, because it was never built: the cinder
+  drop/carry/bank mechanic (§8) and the save-and-quit persistence key
+  (§7b, §10's own file-shape table) — both remain real, reserved, and
+  deferred; see this file's own Status line.
 
 ## 11. Explicitly out of scope for v1
 

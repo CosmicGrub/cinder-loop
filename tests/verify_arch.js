@@ -16,7 +16,13 @@ const s = new H.Suite('verify_arch');
 
 /* Strip comments before scanning for banned identifiers. Prose that mentions
  * `document` is not a use of `document`, and conflating the two trains people
- * to work around the gate instead of with it. */
+ * to work around the gate instead of with it.
+ *
+ * 2026-09-06 audit (#4.27): duplicates build.py's own strip_comments()
+ * line-for-line, independently hand-written in Python for the identical
+ * reason. They can't be literally unified across languages — this comment
+ * (and its mirror in build.py) exists so an edit to one doesn't silently
+ * drift from the other unnoticed. */
 function code(src) {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
@@ -209,6 +215,111 @@ for (const file of H.VIEW_FILES.concat(H.APP_FILES)) {
   s.ok('the second player\'s glow now arms too', view.parryGlow[p1] > 0, view.parryGlow[p1]);
   s.ok('the first player\'s own glow is merely a tick further along its own countdown, not reset or cleared',
     view.parryGlow[p0] === p0Before - 1, p0Before + ' -> ' + view.parryGlow[p0]);
+}
+
+// No shared `threw()` helper exists in this file (unlike verify_gen.js's
+// own local one) — a small one, scoped to this block only, for the two
+// "must NOT throw" checks below (distinct from Suite.prototype.throws,
+// which asserts the OPPOSITE — that a function DOES throw).
+function threw(fn) { try { fn(); return false; } catch (e) { return true; } }
+
+/* ---------------------- 4b. seven silently-dropped events, wired (2026-09-06)
+ * parryStart/ledgeGrab/ledgeClimb/ledgeRelease/statGain/blueprintDrop/
+ * blueprintLost fired real payloads with zero presenter consumer of any
+ * kind since each one's own feature shipped — an audit finding, not a bug
+ * report. Every handler that reads a coordinate off its own payload gets
+ * the exact same finite-position regression check §4a's rollStart/step
+ * fixes already established this file needs (two real, previously-shipped
+ * bugs were both "a handler reads e.y, the emit site never sent one" —
+ * this is the check that would have caught both, applied to every new
+ * handler up front rather than after a bug ships). */
+{
+  // parryStart: driven through the real trigger (a.tap('parry')), the
+  // established pattern for the sibling 'parry' success event elsewhere in
+  // this file — not merely a hand-typed emit, since the trigger itself is
+  // trivial to drive for real here.
+  const a = H.scenario({ C: H.loadWithView(), seed: 8, log: false });
+  a.settle();
+  const canvas = H.stubCanvas(640, 360);
+  const view = new a.C.View(canvas, a.sim);
+  a.tap('parry');
+  view.render();
+  const parryStartParticles = view.particles.list.slice();
+  s.ok('a real parry press produces particles', parryStartParticles.length > 0);
+  s.ok('every one has a real, finite position',
+    parryStartParticles.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+    JSON.stringify(parryStartParticles.slice(0, 3)));
+}
+{
+  // ledgeGrab/ledgeClimb/ledgeRelease and blueprintDrop: the real physical
+  // trigger conditions for these are already covered, at length, by
+  // verify_move.js's/verify_meta.js's own tests of the underlying
+  // mechanics (not the VFX) — this suite's own job is the NEW presenter
+  // wiring specifically, so each is driven with its own REAL payload shape
+  // (the exact fields the real emit site sends, per 30-player.js/70-sim.js),
+  // the same direct-emit style the parryGlow test above already uses for
+  // 'parry' itself, rather than re-deriving a full ledge/kill setup a
+  // second time in a different file.
+  const cases = [
+    ['ledgeGrab', { id: 1, x: 100, y: 200 }],
+    ['ledgeClimb', { id: 1, x: 100, y: 200 }],
+    ['ledgeRelease', { id: 1, x: 100, y: 200 }],
+    ['blueprintDrop', { id: 'daggers', playerId: 1, x: 150, y: 250 }],
+  ];
+  for (const [name, payload] of cases) {
+    const a = H.scenario({ C: H.loadWithView(), seed: 8, log: false });
+    a.settle();
+    const canvas = H.stubCanvas(640, 360);
+    const view = new a.C.View(canvas, a.sim);
+    a.sim.bus.emit(name, payload);
+    view.render();
+    const particles = view.particles.list.slice();
+    s.ok(name + ': produces particles', particles.length > 0, name);
+    s.ok(name + ': every one has a real, finite position',
+      particles.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+      JSON.stringify(particles.slice(0, 3)));
+  }
+}
+{
+  // statGain: the one handler that deliberately does NOT read a coordinate
+  // off its own payload (gainStat's real payload carries none — see
+  // 80-view.js's own comment on why) and instead looks the player's
+  // CURRENT position up from the live sim. Proven against a REAL player,
+  // not a fabricated id, since the lookup itself (matching e.id against
+  // sim.players) is the actual new logic being tested here — a wrong or
+  // missing match is exactly the kind of thing a hand-typed id would never
+  // catch, so this drives a real gainStat() call on a real player instead.
+  const a = H.scenario({ C: H.loadWithView(), seed: 8, log: false });
+  a.settle();
+  const canvas = H.stubCanvas(640, 360);
+  const view = new a.C.View(canvas, a.sim);
+  a.p().gainStat('ember', a.sim.bus);
+  view.render();
+  const gainParticles = view.particles.list.slice();
+  s.ok('a real gainStat() call produces particles', gainParticles.length > 0);
+  s.ok('every one has a real, finite position — the player lookup by id succeeded',
+    gainParticles.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+    JSON.stringify(gainParticles.slice(0, 3)));
+
+  // And the miss case: an id matching no real player must not throw, and
+  // must add zero particles — the `if (!pl) return;` guard actually firing,
+  // not merely present in the source.
+  const before = view.particles.list.length;
+  const threwOnMiss = threw(() => a.sim.bus.emit('statGain', { id: 999999, colour: 'ember', dominant: false }));
+  s.ok('an unmatched player id does not throw', !threwOnMiss);
+  s.eq('...and adds zero particles', view.particles.list.length, before);
+}
+{
+  // blueprintLost: the one event with no x/y in its own real payload
+  // (70-sim.js) — deliberately audio-only (85-audio.js), no particle
+  // handler to regress here. This just confirms the real emit site's own
+  // payload shape doesn't throw against the (intentionally empty) handler.
+  const a = H.scenario({ C: H.loadWithView(), seed: 8, log: false });
+  a.settle();
+  const canvas = H.stubCanvas(640, 360);
+  const view = new a.C.View(canvas, a.sim);
+  const threwOnLost = threw(() => a.sim.bus.emit('blueprintLost', { id: 'daggers', playerId: a.p().id }));
+  s.ok('blueprintLost (audio-only, no x/y in its real payload) does not throw', !threwOnLost);
 }
 
 /* ------------------------------- 5. hitstop does not eat input (L5/feel) */

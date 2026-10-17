@@ -319,6 +319,71 @@ View.prototype.subscribe = function (bus) {
     self.particles.burst(e.x, e.y, 10, 1.6, 18, 'spark');
     self.camera.kick(2);
   }));
+
+  /* 2026-09-06 audit: seven real Bus events with zero presenter consumer —
+   * not even the deliberate "recorded, no visual yet" stub this file's
+   * own rollEnd/dashEnd/crouch/uncrouch/wallTouch already use for effects
+   * consciously deferred. blueprintLost is the one exception below that
+   * gets no particle burst here — its own payload (70-sim.js) carries no
+   * x/y, and death's own burst (above) already covers the same instant
+   * visually; its cue is audio-only (85-audio.js's TRIGGERS). */
+
+  // parryStart — the window ARMING, distinct from the 'parry' event above
+  // (a successful negation). A small, quiet puff at the player's own body,
+  // the same "commitment is visible, reward is louder" relationship
+  // telegraph/enemyAttack already have with hit/targetDown.
+  bus.on('parryStart', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H / 2, 4, 0.6, 14);
+  }));
+
+  // Ledge grab/climb/release: a real, physically-authored, extensively
+  // regression-tested mechanic (masterfile's own ledge-grab section) that
+  // shipped with NO feedback at all for any of its three moments.
+  bus.on('ledgeGrab', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H, 6, 1.0, 16);
+  }));
+  bus.on('ledgeClimb', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H, 8, 1.2, 18);
+  }));
+  bus.on('ledgeRelease', fx(function (e) {
+    self.particles.burst(e.x + CFG.PLAYER_W / 2, e.y + CFG.PLAYER_H / 2, 3, 0.5, 12);
+  }));
+
+  // statGain — D2's own dominant-stat feedback, silent since D2 shipped.
+  // The payload carries no x/y (Player.prototype.gainStat has no world
+  // position to report, only stat state), so this looks the player's
+  // CURRENT body position up from the live sim the same way drawHud
+  // already reads player state directly — the one place in this function
+  // that reaches past its own event payload for a coordinate, and only
+  // because gainStat's own payload was never meant to carry one (30-
+  // player.js sits below the presenter boundary and rightly doesn't
+  // format render-facing data). A real, becoming-dominant gain reads
+  // bigger than a routine one — D19 (Dominance Breakpoints) is about to
+  // make that exact distinction mechanically load-bearing, not just
+  // cosmetic.
+  bus.on('statGain', fx(function (e) {
+    var pl = null;
+    for (var i = 0; i < self.sim.players.length; i++) {
+      if (self.sim.players[i].id === e.id) { pl = self.sim.players[i]; break; }
+    }
+    if (!pl) return;
+    var b = pl.body;
+    if (e.dominant) self.particles.burst(b.x + CFG.PLAYER_W / 2, b.y, 12, 1.6, 22, 'spark');
+    else self.particles.burst(b.x + CFG.PLAYER_W / 2, b.y, 5, 0.8, 16);
+  }));
+
+  // blueprintDrop — the drop half of blueprintUnlocked's own already-cued
+  // lifecycle; the OTHER half (unlock) has had a chime since it shipped,
+  // the drop moment itself never did. Real coordinates in the payload
+  // (the killed enemy's own position, 70-sim.js), unlike blueprintLost
+  // below.
+  bus.on('blueprintDrop', fx(function (e) {
+    self.particles.burst(e.x, e.y, 10, 1.4, 20, 'spark');
+  }));
+  // blueprintLost: audio-only (85-audio.js) — see this block's own header
+  // comment for why no particle burst is added here.
+  bus.on('blueprintLost', fx(function () {}));
+
   return this;
 };
 

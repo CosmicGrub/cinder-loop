@@ -1,10 +1,12 @@
 /* ===========================================================================
  * 45-enemy.js  —  enemy entities + per-instance-seeded brains
  * ---------------------------------------------------------------------------
- * SIM layer. The engine knows four primitives — walk+melee, walk+charge,
- * walk+shoot, fly+dive. A template in 10-data.js picks one and supplies
- * numbers. Adding a fifth archetype costs exactly one primitive; adding a
- * fifth ENEMY costs a row (D7).
+ * SIM layer. The engine knows five primitives — walk+melee, walk+charge,
+ * walk+shoot, fly+dive, and walk+summon (D16 — an elite that calls in
+ * one of the regular roster mid-fight, 56-caller.js). A template in
+ * 10-data.js picks one and supplies numbers. Adding a sixth archetype
+ * costs exactly one primitive; adding a fifth regular ENEMY costs a row
+ * (D7) — the Caller is kept OUT of that roster the same way Kilnwarden is.
  *
  * THE FAIRNESS RULE, and it is the whole design:
  *
@@ -137,6 +139,12 @@ Enemy.prototype.resetTransient = function () {
   this.activeMove = null;
   this.phase = 0;
   this._zoneTiles = null;
+  // Optional summon-primitive support (56-caller.js). Only 'summon'-verb
+  // templates (the Caller) ever increment this; a LIFETIME cap across the
+  // whole encounter, read by callIn() as `this.summonsUsed >= m.summonMax`.
+  // Never leaves 0 for the regular roster or the boss — provably a no-op
+  // for both, the same guarantee activeMove/phase already document above.
+  this.summonsUsed = 0;
   return this;
 };
 
@@ -229,6 +237,7 @@ Enemy.prototype.update = function (world, players, bus, ctx) {
     case 'strike':   this.doStrike(); break;
     case 'charge':   this.doCharge(); break;
     case 'shoot':    this.doShoot(); break;
+    case 'summon':   this.doSummon(); break;
     case 'dive':     this.doDive(); break;
     case 'zone':     this.doZone(world); break;
     case 'phaseTransition': this.doPhaseTransition(); break;
@@ -384,6 +393,10 @@ Enemy.prototype.doTelegraph = function (bus, ctx) {
       this.fire(ctx);
       this.enter('shoot');
       break;
+    case 'summon':
+      this.callIn(ctx);
+      this.enter('summon');
+      break;
     case 'dive':
       this.enter('dive');
       break;
@@ -412,6 +425,55 @@ Enemy.prototype.fire = function (ctx) {
   }
 };
 
+// D16 (summon primitive): places up to m.summonCount real, independent
+// Enemy instances via ctx.addEnemy — a two-line mirror of ctx.addShot
+// above, delegating to the already-existing Sim.prototype.addEnemy.
+// this.summonsUsed is a LIFETIME cap across the whole encounter, not a
+// per-cast budget — a Caller that has already used up m.summonMax calls
+// telegraphs for nothing further; the >= guard at entry makes a repeat
+// call a safe, cheap no-op rather than re-summoning past the cap. No
+// parent/child link to what gets spawned — killing this Caller does not
+// despawn its own summoned adds (this engine has no such lifecycle
+// mechanism anywhere, and building one isn't warranted for v1).
+//
+// Adversarially found: "no terrain-probing needed, gravity resolves it"
+// (the original design reasoning) is false when the offset spawn point
+// lands INSIDE a multi-row-solid mass rather than open air or a shallow
+// floor overlap — Body.prototype.moveY only snaps out of the TOPMOST
+// solid row it currently overlaps, so a deeply-embedded body re-triggers
+// that same snap every tick and climbs upward through the rock instead of
+// falling. Real generated rooms really do have such walls (50-gen.js's
+// own boundary-column stamp, spanning a room's full height), and
+// lockFacing can point straight at one. Checked directly against the
+// summoned template's own real footprint (not a 1x1 guess) and falls
+// back to the Caller's own already-valid position when embedded — the
+// same defensive-fallback shape pickMove() already uses when its own
+// eligible pool is empty.
+Enemy.prototype.callIn = function (ctx) {
+  var m = this.activeMove || this.t, b = this.body;
+  if (!ctx || !ctx.addEnemy || this.summonsUsed >= m.summonMax) return;
+  var count = m.summonCount || 1;
+  var summonT = DATA.ENEMIES[m.summonId];
+  var sw = summonT ? summonT.w : 1, sh = summonT ? summonT.h : 1;
+  for (var i = 0; i < count; i++) {
+    if (this.summonsUsed >= m.summonMax) break;
+    // this.lockFacing scales BOTH terms — the base offset and the
+    // per-index fan-out — so successive spawns fan out AWAY from the
+    // Caller symmetrically regardless of which way it's facing. An
+    // earlier version only scaled the base offset, folding later spawns
+    // back toward (and eventually past) the Caller when facing left —
+    // dead in v1 (summonCount is 1) but a real formula bug waiting for
+    // the first template that ever raises it.
+    var spawnX = b.x + this.lockFacing * (m.summonOffset || 24) + this.lockFacing * i * 12;
+    var spawnY = b.y;
+    if (ctx.rectSolid && ctx.rectSolid(spawnX, spawnY, sw, sh)) {
+      spawnX = b.x; spawnY = b.y;
+    }
+    ctx.addEnemy(m.summonId, spawnX, spawnY);
+    this.summonsUsed++;
+  }
+};
+
 Enemy.prototype.doStrike = function () {
   // The rig move drives the timing; advanceMove ends it.
   this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
@@ -425,6 +487,19 @@ Enemy.prototype.doCharge = function () {
 };
 
 Enemy.prototype.doShoot = function () {
+  var m = this.activeMove || this.t;
+  this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
+  if (this.stateFrames >= m.recover) this.enter('recover');
+};
+
+// D16: a near-copy of doShoot()'s own body, deliberately — every other
+// primitive gives the player a real post-commit punish window (m.recover
+// frames standing still before falling into the shared cooldown logic in
+// doRecover()); skipping straight to 'recover' after the call fires (the
+// original pitch's own proposed shape) would have made a Caller uniquely
+// safe the instant its telegraph ends, unlike every other enemy in the
+// game.
+Enemy.prototype.doSummon = function () {
   var m = this.activeMove || this.t;
   this.body.vx = approach(this.body.vx, 0, CFG.ENEMY_FRICTION);
   if (this.stateFrames >= m.recover) this.enter('recover');
@@ -531,7 +606,7 @@ Enemy.prototype.doStaggered = function () {
 
 /* The transition itself is requested here — the one seam in the whole
  * state machine where nothing dangerous is ever in flight (doRecover is
- * reached only after strike/charge/shoot/dive/zone have each fully
+ * reached only after strike/charge/shoot/summon/dive/zone have each fully
  * resolved) — rather than checked eagerly every tick from update(), so an
  * hp threshold crossed mid-attack can never retroactively revise an attack
  * already telegraphed. Same discipline as the fairness rule itself: a

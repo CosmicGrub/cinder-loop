@@ -29,6 +29,14 @@ function Body(x, y, w, h) {
   this.onCeiling = false;
   this.onWall = 0;          // -1 touching a wall to the left, +1 to the right
   this.dropThrough = 0;     // frames remaining of ignoring one-way platforms
+  // D17: a bounded moveX exemption for a body that just left solid ground
+  // horizontally with no upward velocity (a grounded Roll) — see moveX's
+  // own comment below for the mechanism, and 30-player.js's roll-entry/
+  // endRoll for the only place that ever arms/disarms these. Inert for
+  // every other body (enemies, the player in any other state): nothing
+  // else in the codebase ever sets wallLeniency true.
+  this.wallLeniency = false;
+  this.leaveRow = -1;       // the tile row wallLeniency is scoped to, or -1
 }
 
 Body.prototype.bottom = function () { return this.y + this.h; };
@@ -58,6 +66,18 @@ function moveX(body, world, dx) {
       // One-way platforms are floors, never walls. Blocking X on them turns
       // every ledge into a shelf you get stuck against.
       if (world.get(tx, ty) !== TILE.SOLID) continue;
+      // D17: a body mid-roll gets a bounded exemption on the exact row it
+      // just left. Without this, ordinary axis-separated resolution (X
+      // fully, then Y) blocks a flat-rise roll on the far platform's own
+      // wall before Y ever gets a chance to land it — a roll starts with
+      // zero vertical velocity flush against the ground, so gravity sinks
+      // its own hitbox into this row within 1-2 ticks, long before it can
+      // have crossed a real gap horizontally. Scoped to ONE row only (a
+      // multi-row-tall wall's other rows still block normally) and to
+      // however long wallLeniency stays armed (roll's own duration) — see
+      // 30-player.js's roll-entry/endRoll, the only place that ever sets
+      // this true/false.
+      if (body.wallLeniency && ty === body.leaveRow) continue;
       if (dx > 0) {
         body.x = tx * CFG.TILE - body.w;
       } else if (dx < 0) {

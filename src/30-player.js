@@ -90,6 +90,23 @@ function pickStatColour(stats, rng) {
   return STAT_COLOURS[STAT_COLOURS.length - 1];
 }
 
+/* D19: the general form of the same "strictly unique highest, a tie
+ * doesn't count" rule gainStat's own inline dominance check already used
+ * (below) for its own narrow question ("was the just-incremented colour
+ * the one that came out on top"). Extracted so D19's three passives and
+ * D20 (Grafts, future) can both ask "what's dominant right now" without
+ * re-deriving the rule a second and third time. Returns null on a tie
+ * (two- or three-way) — matching gainStat's own existing "a tie grants no
+ * maxHp bonus" behavior generalized to every consumer of this function. */
+function dominantColour(stats) {
+  var max = Math.max(stats.ember, stats.umbral, stats.verdant);
+  var winner = null, ties = 0, k;
+  for (k in stats) {
+    if (stats[k] === max) { ties++; winner = k; }
+  }
+  return ties === 1 ? winner : null;
+}
+
 function Player(id, x, y) {
   this.id = id | 0;
   this.spawnX = x;
@@ -108,6 +125,11 @@ Player.prototype.resetTransient = function () {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -189,8 +211,8 @@ Player.prototype.resetTransient = function () {
   // all. D2's own stat pickups are unrelated — they're real and collectible
   // now, they just never touch this field.
   this.weapon = 'blade';
-  // D4/65-meta.js: a carried, not-yet-handed-in blueprint (a weapon id, or
-  // null). Owned by 70-sim.js, which sits above this file and may write it
+  // D4/65-meta.js: carried, not-yet-handed-in blueprints (weapon ids; see
+  // the D24 note below). Owned by 70-sim.js, which sits above this file and may write it
   // on a real kill's blueprint-drop roll — the player only ever carries it.
   // Reset HERE, on the same "one run boundary" resetTransient() already is,
   // is what makes "lost on death" true for free: a death already calls this
@@ -200,7 +222,10 @@ Player.prototype.resetTransient = function () {
   // Deliberately NOT cleared by teleport() (below) — a live level->boss
   // transition is not a death, and D4 says a blueprint survives all the way
   // to "a transition" (hand-in), not merely to the next room.
-  this.carriedBlueprint = null;
+  // D24: an array, up to a capacity 70-sim.js decides (never stored here —
+  // Player has no Meta access, the same one-way dependency this file has
+  // always kept). `.length` IS the fill level; no null-padding.
+  this.carriedBlueprints = [];
   // The box this character's poses were authored in. Combat mirrors and
   // feet-anchors against it, so entities of different sizes each get their own.
   this.poseW = CFG.PLAYER_W;
@@ -247,6 +272,11 @@ Player.prototype.teleport = function (x, y) {
   b.w = CFG.PLAYER_W; b.h = CFG.PLAYER_H;
   b.vx = 0; b.vy = 0;
   b.onGround = false; b.onCeiling = false; b.onWall = 0; b.dropThrough = 0;
+  // D17: same "movement/action state, not run-scoped" category as the
+  // fields just above — a stale wall-leniency exemption carried into
+  // fresh geometry (a respawn, or a teleport into a new room) makes no
+  // more sense than a stale onWall/dropThrough would.
+  b.wallLeniency = false; b.leaveRow = -1;
 
   this.state = 'fall';
   this.stateFrames = 0;
@@ -257,7 +287,7 @@ Player.prototype.teleport = function (x, y) {
   this.parryWindow = 0; this.parryCd = 0;
   // dashExtraCharge/dashExtIframes/parryRiposte/parryReflect are
   // deliberately NOT reset here — the same "a live transition is not a
-  // death" reasoning carriedBlueprint's own comment already states.
+  // death" reasoning carriedBlueprints' own comment already states.
   // Ownership survives; dashCharges (the momentary RESOURCE, above) still
   // clears, refilling naturally on the next ground contact.
   this.cutArmed = false;
@@ -278,6 +308,15 @@ Player.prototype.invulnerable = function () {
   return this.iframes > 0 || this.state === 'roll' || this.state === 'dash';
 };
 Player.prototype.alive = function () { return this.state !== 'dead'; };
+// D15 (weapon equip & switch): Combat.step re-reads player.weapon every
+// tick an attack resolves (Combat.weaponScale, 40-combat.js:302-313) to
+// scale its damage — switching mid-swing would silently reweight an
+// in-flight move's damage using the NEW weapon's stat-colour pair, not
+// the one the move actually belongs to. Gating on "no active attack" is
+// necessary and sufficient: player.weapon is read nowhere else outside
+// that one path (design spec §1) — no additional check against roll/
+// dash/ledge state is needed.
+Player.prototype.canSwitchWeapon = function () { return !this.attack; };
 
 Player.prototype.update = function (pad, world, bus) {
   var b = this.body;
@@ -525,6 +564,12 @@ Player.prototype.update = function (pad, world, bus) {
       // frame is a free nineteenth frame and the distance overshoots.
       this.rollFrames = CFG.ROLL_FRAMES - 1;
       this.rollFrom = b.x;
+      // D17: arm the moveX wall-leniency (25-body.js) on the exact row
+      // this roll is departing from, while the body is still flush
+      // grounded — see that file's own comment for the mechanism. Cleared
+      // in endRoll(), below, so the exemption can never outlive this roll.
+      b.leaveRow = world.tileY(b.bottom());
+      b.wallLeniency = true;
       if (!this.crouching) { this.crouching = true; b.setHeight(CFG.PLAYER_CROUCH_H); }
       b.vx = this.facing * CFG.ROLL_SPEED;
       // Gravity on the start frame too. Without it vy is 0, moveY never runs,
@@ -594,7 +639,12 @@ Player.prototype.update = function (pad, world, bus) {
     if (pad.buffered('parry') && this.parryCd <= 0 && this.parryWindow <= 0) {
       pad.consume('parry');
       C.Combat.cancel(this, bus);
-      this.parryWindow = CFG.PARRY_WINDOW_FRAMES;
+      // D19: umbral dominance widens the parry window itself. Checked
+      // fresh at the moment of the press, same discipline as endDash's
+      // ember check and endRoll's verdant check.
+      this.parryWindow = dominantColour(this.stats) === 'umbral'
+        ? CFG.PARRY_WINDOW_FRAMES + CFG.DOMINANCE_PARRY_WINDOW_BONUS
+        : CFG.PARRY_WINDOW_FRAMES;
       bus.emit('parryStart', { id: this.id, x: b.x, y: b.y });
     }
 
@@ -722,7 +772,19 @@ Player.prototype.finish = function (world, bus, wasGrounded, axis) {
 
 Player.prototype.endRoll = function (world, bus) {
   var b = this.body;
-  this.rollCd = CFG.ROLL_COOLDOWN_FRAMES;
+  // D19: verdant dominance shortens Roll's own cooldown. Checked fresh
+  // here, not snapshotted at roll-entry or anywhere else — the same
+  // "read at the moment of the effect" discipline D24's own capacity
+  // check uses, so a stat gain mid-roll can change the NEXT roll's
+  // cooldown even though it can never affect the roll already ending.
+  this.rollCd = dominantColour(this.stats) === 'verdant'
+    ? CFG.ROLL_COOLDOWN_FRAMES - CFG.DOMINANCE_ROLL_CD_REDUCTION
+    : CFG.ROLL_COOLDOWN_FRAMES;
+  // D17: disarm the wall-leniency the instant the roll that armed it ends
+  // — the exemption must never outlive its own roll (30-player.js's own
+  // roll-entry block is the only place this is ever set true).
+  b.wallLeniency = false;
+  b.leaveRow = -1;
   // Stand back up if there is room; a low ceiling keeps you crouched rather
   // than teleporting you into it.
   if (b.canStand(world, CFG.PLAYER_H)) {
@@ -738,7 +800,12 @@ Player.prototype.endRoll = function (world, bus) {
 
 Player.prototype.endDash = function (world, bus) {
   var b = this.body;
-  this.dashCd = CFG.DASH_COOLDOWN_FRAMES;
+  // D19: ember dominance shortens Ember Dash's own cooldown. Checked fresh
+  // at end-of-dash, same discipline as endRoll's own verdant check below —
+  // never snapshotted at dash-entry.
+  this.dashCd = dominantColour(this.stats) === 'ember'
+    ? CFG.DASH_COOLDOWN_FRAMES - CFG.DOMINANCE_DASH_CD_REDUCTION
+    : CFG.DASH_COOLDOWN_FRAMES;
   // Dash Extended I-Frames (§4): the dash's own i-frames already cover its
   // full committed duration (invulnerable()'s state === 'dash' check) —
   // "extended" means a residual window immediately AFTER it ends, not a
@@ -798,8 +865,14 @@ Player.prototype.hurt = function (amount, bus, knock) {
  * this function only ever applies a gain already chosen, it never picks. */
 Player.prototype.gainStat = function (colour, bus) {
   this.stats[colour]++;
-  var v = this.stats[colour], dominant = true, k;
-  for (k in this.stats) { if (k !== colour && this.stats[k] >= v) dominant = false; }
+  var v = this.stats[colour];
+  // D19: generalized onto dominantColour() — provably equivalent to the
+  // inline check this replaced for every real call, since gainStat only
+  // ever increments the one `colour` passed in: at this point `colour`'s
+  // value is the only one that just changed, so it is the unique max
+  // under dominantColour's rule if and only if no other stat was already
+  // >= v under the old inline check.
+  var dominant = dominantColour(this.stats) === colour;
   if (dominant) {
     this.maxHp += CFG.STAT_HP_GAIN;
     this.hp += CFG.STAT_HP_GAIN;
@@ -810,6 +883,7 @@ Player.prototype.gainStat = function (colour, bus) {
 
 C.Player = Player;
 C.pickStatColour = pickStatColour;
+C.dominantColour = dominantColour;
 C.STAT_COLOURS = STAT_COLOURS;
 
 })(CINDER);

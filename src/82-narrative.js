@@ -119,6 +119,12 @@ Narrative.prototype.subscribe = function (bus) {
   this._subscribed = true;
   var self = this;
   bus.on('telegraph', function (e) { self._bark(e.tid); });
+  // D21: 'checkpoint' (70-sim.js's own _onRoomClear()) is already a real,
+  // whitelisted Bus event, added by D14 with a declared consumer here that
+  // was never wired up until now — zero new CFG, zero new Bus event, zero
+  // sim-file change. Reuses _say()/LINE_TTL_MS verbatim; no payload
+  // branching on healed/handedIn (v2, named out of scope in the spec).
+  bus.on('checkpoint', function () { self._say('checkpoint', LINE_TTL_MS); });
   return this;
 };
 

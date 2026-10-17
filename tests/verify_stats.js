@@ -22,11 +22,7 @@ const s = new H.Suite('verify_stats');
 const C = H.loadSim();
 const CFG = C.CFG, DATA = C.DATA, Combat = C.Combat;
 
-function fresh(spec) {
-  const a = H.scenario(spec);
-  a.settle();
-  return a;
-}
+const fresh = H.fresh;   // shared definition lives in harness.js
 
 /* ==================================================== stat data shape */
 {
@@ -85,6 +81,55 @@ function fresh(spec) {
   p.gainStat('umbral', a.sim.bus);              // umbral: 2 — still behind ember (3), not dominant
   s.eq('still behind the leader is not dominant', a.events('statGain')[0].payload.dominant, false);
   s.eq('maxHp unchanged', p.maxHp, maxHpBefore);
+}
+
+/* ================================================ dominantColour (D19)
+ * The general "strictly unique highest, a tie doesn't count" rule
+ * extracted from gainStat's own inline check above, so D19's three
+ * passives (verify_move.js) and a future D20 (Grafts) reuse can both ask
+ * "what's dominant right now" without re-deriving the rule a second and
+ * third time. Proven here as its own pure function, and proven
+ * equivalent to gainStat's own PRE-refactor inline check across a sweep
+ * of hand-built stat triples — not just spot cases (spec's own §7, first
+ * bullet).
+ */
+{
+  s.eq('a clean unique max returns that colour',
+    C.dominantColour({ ember: 5, umbral: 1, verdant: 2 }), 'ember');
+  s.eq('a two-way tie returns null', C.dominantColour({ ember: 3, umbral: 3, verdant: 1 }), null);
+  s.eq('a three-way tie returns null', C.dominantColour({ ember: 2, umbral: 2, verdant: 2 }), null);
+  s.eq('the sole leader need not be first alphabetically',
+    C.dominantColour({ ember: 1, umbral: 1, verdant: 4 }), 'verdant');
+}
+{
+  // Equivalence sweep against gainStat's OWN pre-refactor logic (the
+  // literal inline check this function replaced): "for the colour that
+  // was just incremented to v, is v strictly greater than every other
+  // stat" — reimplemented here ONLY as the old reference to check the
+  // new general function against, never as a replacement for exercising
+  // the real gainStat itself (that stays in the section above, driven
+  // through the real function, never reimplemented).
+  function oldInlineDominant(stats, colour) {
+    const v = stats[colour];
+    let dominant = true;
+    for (const k in stats) { if (k !== colour && stats[k] >= v) dominant = false; }
+    return dominant;
+  }
+  const triples = [
+    [1, 1, 1], [2, 1, 1], [1, 2, 1], [1, 1, 2], [2, 2, 1], [3, 1, 2],
+    [5, 5, 5], [0, 0, 1], [4, 4, 4], [10, 3, 3], [3, 10, 3], [3, 3, 10],
+  ];
+  let checked = 0;
+  for (const [e, u, v] of triples) {
+    const stats = { ember: e, umbral: u, verdant: v };
+    for (const colour of C.STAT_COLOURS) {
+      const expected = oldInlineDominant(stats, colour);
+      const actual = C.dominantColour(stats) === colour;
+      s.eq('equivalence: ' + JSON.stringify(stats) + ' / ' + colour, actual, expected);
+      checked++;
+    }
+  }
+  s.eq('the equivalence sweep actually ran a real number of cases', checked, triples.length * 3);
 }
 
 /* ============================================ pickStatColour weighting
