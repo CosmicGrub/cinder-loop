@@ -18,11 +18,7 @@ const CFG = H.loadSim().CFG;
 
 const REST = 586;
 
-function fresh(spec) {
-  const a = H.scenario(spec);
-  a.settle();
-  return a;
-}
+const fresh = H.fresh;   // shared definition lives in harness.js
 
 /* ===================================================== horizontal motion */
 {

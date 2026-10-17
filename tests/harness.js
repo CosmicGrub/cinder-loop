@@ -310,6 +310,19 @@ function scenario(spec = {}) {
   return api;
 }
 
+/* scenario() + settle(): a scenario whose body has already come to rest on the
+ * floor, which is what almost every movement/combat assertion wants as its
+ * starting point (a body spawned mid-air reads onGround=false on tick 0).
+ * Was a byte-identical private copy in verify_move/enemy/stats/combat — the
+ * exact "one sibling patched, others missed" shape this project's changelog
+ * has already had to fix twice for attemptHop/realKill (2026-09-06 audit
+ * #4.23). One definition now. */
+function fresh(spec) {
+  const a = scenario(spec);
+  a.settle();
+  return a;
+}
+
 /* ------------------------------------------------------------------ Suite */
 function Suite(name) {
   this.name = name;
@@ -686,6 +699,6 @@ module.exports = {
   ROOT, SRC, SIM_FILES, VIEW_FILES, APP_FILES,
   readSrc, loadSim, loadWithView, loadPlatform, loadNarrative, loadAudio, stubCanvas,
   flatWorld, ledgeWorld, FLOOR_Y, REST_Y,
-  scenario, Suite,
+  scenario, fresh, Suite,
   HOP_STRATEGIES, attemptHop, attemptHopWith, attemptRoll
 };

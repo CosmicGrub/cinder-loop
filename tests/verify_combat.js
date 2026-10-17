@@ -16,11 +16,7 @@ const CFG = C.CFG;
 
 const DUMMY_Y = 588;
 
-function fresh(spec) {
-  const a = H.scenario(spec);
-  a.settle();
-  return a;
-}
+const fresh = H.fresh;   // shared definition lives in harness.js
 // A dummy squarely in the path of a right-facing slash.
 const inFront = (hp) => [[96, DUMMY_Y, hp === undefined ? 30 : hp]];
 
